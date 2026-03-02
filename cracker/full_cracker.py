@@ -9,6 +9,8 @@ The approach: we model each character's encryption path entirely in Z3 using
 lookup tables encoded as If-Then-Else chains, combined with modular arithmetic.
 """
 
+import time
+
 from z3 import (
     Int, IntVector, Solver, And, Or, If, Distinct,
     sat, Implies, Not, Function, IntSort,
@@ -215,6 +217,224 @@ def crack_rotor_positions(
 # Level 2/3: Crack rotor positions AND plugboard
 # ---------------------------------------------------------------------------
 
+def _compute_positions_numeric(
+    left0: int,
+    middle0: int,
+    right0: int,
+    n: int,
+    notches: list[int],
+) -> tuple[list[int], list[int], list[int]]:
+    """
+    Numeric version of rotor stepping (same logic as _compute_positions).
+    Returns positions after stepping for each character index.
+    """
+    pos_left: list[int] = []
+    pos_middle: list[int] = []
+    pos_right: list[int] = []
+
+    for i in range(n):
+        if i == 0:
+            prev_left, prev_middle, prev_right = left0, middle0, right0
+        else:
+            prev_left, prev_middle, prev_right = (
+                pos_left[i - 1],
+                pos_middle[i - 1],
+                pos_right[i - 1],
+            )
+
+        middle_at_notch = prev_middle == notches[1]
+        right_at_notch = prev_right == notches[2]
+        middle_steps = right_at_notch or middle_at_notch
+        left_steps = middle_at_notch
+
+        pos_right.append((prev_right + 1) % 26)
+        pos_middle.append((prev_middle + 1) % 26 if middle_steps else prev_middle)
+        pos_left.append((prev_left + 1) % 26 if left_steps else prev_left)
+
+    return pos_left, pos_middle, pos_right
+
+
+def _encrypt_core_numeric(
+    letter_val: int,
+    pos_left: int,
+    pos_middle: int,
+    pos_right: int,
+    r_fwd: list[list[int]],
+    r_inv: list[list[int]],
+    refl: list[int],
+    rings: list[int],
+) -> int:
+    """
+    Encrypt one letter through rotors+reflector only (no plugboard), numerically.
+    """
+    idx_r = (letter_val + pos_right - rings[2]) % 26
+    x = (r_fwd[2][idx_r] - pos_right + rings[2]) % 26
+
+    idx_m = (x + pos_middle - rings[1]) % 26
+    x = (r_fwd[1][idx_m] - pos_middle + rings[1]) % 26
+
+    idx_l = (x + pos_left - rings[0]) % 26
+    x = (r_fwd[0][idx_l] - pos_left + rings[0]) % 26
+
+    x = refl[x]
+
+    idx_l_b = (x + pos_left - rings[0]) % 26
+    x = (r_inv[0][idx_l_b] - pos_left + rings[0]) % 26
+
+    idx_m_b = (x + pos_middle - rings[1]) % 26
+    x = (r_inv[1][idx_m_b] - pos_middle + rings[1]) % 26
+
+    idx_r_b = (x + pos_right - rings[2]) % 26
+    x = (r_inv[2][idx_r_b] - pos_right + rings[2]) % 26
+    return x
+
+
+def _assign_plug_pair(
+    mapping: dict[int, int],
+    a: int,
+    b: int,
+    pairs_used: int,
+    max_pairs: int,
+) -> int | None:
+    """
+    Add/validate plugboard constraint P(a)=b and P(b)=a.
+    Returns updated pairs_used, or None on contradiction.
+    """
+    map_a = mapping.get(a)
+    map_b = mapping.get(b)
+
+    if map_a is not None and map_a != b:
+        return None
+    if map_b is not None and map_b != a:
+        return None
+    if map_a == b and map_b == a:
+        return pairs_used
+
+    if a != b:
+        # This search keeps assignments symmetric; a half-known non-trivial mapping
+        # indicates contradiction in our partial state.
+        if (map_a is None) != (map_b is None):
+            return None
+        if map_a is None and map_b is None:
+            pairs_used += 1
+            if pairs_used > max_pairs:
+                return None
+
+    mapping[a] = b
+    mapping[b] = a
+    return pairs_used
+
+
+def _x_candidates(
+    mapping: dict[int, int],
+    pairs_used: int,
+    max_pairs: int,
+    plain_val: int,
+    cipher_val: int,
+    core_inv: list[int],
+) -> list[int]:
+    """
+    Candidate values for x = P(plain_val) in one constraint:
+      P(core[P(plain_val)]) = cipher_val
+    """
+    if plain_val in mapping:
+        return [mapping[plain_val]]
+
+    if pairs_used >= max_pairs:
+        return [plain_val]
+
+    if cipher_val in mapping:
+        return [core_inv[mapping[cipher_val]]]
+
+    # Identity-first ordering tends to prune quickly for low pair counts.
+    return [plain_val] + [x for x in range(26) if x != plain_val]
+
+
+def _solve_plugboard_constraints(
+    constraints: list[tuple[int, int, list[int], list[int]]],
+    max_pairs: int,
+    deadline: float | None,
+):
+    """
+    Solve plugboard constraints for fixed rotor positions.
+
+    Parameters
+    ----------
+    constraints : list of tuples (p, c, core_table, core_inv_table)
+    max_pairs : int
+    deadline : absolute perf_counter time, or None
+
+    Returns
+    -------
+    dict[int, int] | None | timeout_marker
+    """
+    timeout_marker = object()
+    n = len(constraints)
+
+    def choose_index(remaining: list[int], mapping: dict[int, int], pairs_used: int) -> int:
+        best = remaining[0]
+        best_size = 27
+        for idx in remaining:
+            p, c, _, _ = constraints[idx]
+            if p in mapping or pairs_used >= max_pairs or c in mapping:
+                size = 1
+            else:
+                size = 26
+            if size < best_size:
+                best = idx
+                best_size = size
+                if size == 1:
+                    break
+        return best
+
+    def backtrack(
+        remaining: list[int],
+        mapping: dict[int, int],
+        pairs_used: int,
+    ):
+        if deadline is not None and time.perf_counter() > deadline:
+            return timeout_marker
+
+        if not remaining:
+            return mapping
+
+        idx = choose_index(remaining, mapping, pairs_used)
+        p, c, core_table, core_inv = constraints[idx]
+        next_remaining = [j for j in remaining if j != idx]
+
+        for x in _x_candidates(mapping, pairs_used, max_pairs, p, c, core_inv):
+            mapping_next = dict(mapping)
+            pairs_after_plain = _assign_plug_pair(
+                mapping_next,
+                p,
+                x,
+                pairs_used,
+                max_pairs,
+            )
+            if pairs_after_plain is None:
+                continue
+
+            y = core_table[x]
+            pairs_after_cipher = _assign_plug_pair(
+                mapping_next,
+                y,
+                c,
+                pairs_after_plain,
+                max_pairs,
+            )
+            if pairs_after_cipher is None:
+                continue
+
+            result = backtrack(next_remaining, mapping_next, pairs_after_cipher)
+            if result is timeout_marker:
+                return timeout_marker
+            if result is not None:
+                return result
+        return None
+
+    return backtrack(list(range(n)), {}, 0), timeout_marker
+
+
 def crack_with_plugboard(
     ciphertext: str,
     crib: str,
@@ -227,8 +447,10 @@ def crack_with_plugboard(
     """
     Find rotor positions AND plugboard pairs.
 
-    This models the plugboard as Z3 variables with the constraint that
-    it forms a valid involution (each letter maps to at most one other).
+    Two-phase strategy:
+    1) brute-force rotor start positions;
+    2) for each rotor candidate, solve only the plugboard constraints
+       with backtracking over an involution mapping.
 
     Parameters
     ----------
@@ -238,6 +460,8 @@ def crack_with_plugboard(
     num_plugboard_pairs : int
         Max number of plugboard pairs to search for.
     ring_settings : tuple of 3 ints
+    solver_timeout_ms : int | None
+        Global timeout budget for the whole search.
 
     Returns
     -------
@@ -260,71 +484,61 @@ def crack_with_plugboard(
     refl = _reflector(reflector_name)
     notches = [ord(ROTOR_NOTCHES[r]) - ord("A") for r in rotor_names]
     rings = list(ring_settings)
+    crib_vals = [ord(ch) - ord("A") for ch in crib]
+    cipher_vals = [ord(ch) - ord("A") for ch in ciphertext[:n]]
 
-    s = Solver()
+    deadline = None
     if solver_timeout_ms is not None:
-        s.set(timeout=solver_timeout_ms)
+        deadline = time.perf_counter() + (solver_timeout_ms / 1000.0)
 
-    # Rotor start positions
-    L0 = Int("L0")
-    M0 = Int("M0")
-    R0 = Int("R0")
-    s.add(L0 >= 0, L0 < 26)
-    s.add(M0 >= 0, M0 < 26)
-    s.add(R0 >= 0, R0 < 26)
+    # Phase 1: brute-force rotor positions.
+    # Phase 2 (for each candidate): solve only plugboard constraints.
+    for left0 in range(26):
+        for middle0 in range(26):
+            for right0 in range(26):
+                if deadline is not None and time.perf_counter() > deadline:
+                    return None
 
-    # Plugboard as 26 Int variables
-    plug = IntVector("plug", 26)
-    for i in range(26):
-        s.add(plug[i] >= 0, plug[i] < 26)
+                pos_left, pos_middle, pos_right = _compute_positions_numeric(
+                    left0, middle0, right0, n, notches
+                )
 
-    # Plugboard must be an involution: plug[plug[i]] == i
-    for i in range(26):
-        s.add(_z3_lookup_vec(plug, _z3_lookup_vec(plug, i)) == i)
+                constraints: list[tuple[int, int, list[int], list[int]]] = []
+                for i in range(n):
+                    core_table = [
+                        _encrypt_core_numeric(
+                            x,
+                            pos_left[i],
+                            pos_middle[i],
+                            pos_right[i],
+                            r_fwd,
+                            r_inv,
+                            refl,
+                            rings,
+                        )
+                        for x in range(26)
+                    ]
+                    core_inv = [0] * 26
+                    for x, y in enumerate(core_table):
+                        core_inv[y] = x
+                    constraints.append((crib_vals[i], cipher_vals[i], core_table, core_inv))
 
-    # At most num_plugboard_pairs swaps (rest are identity)
-    swap_count = sum([If(plug[i] != i, 1, 0) for i in range(26)])
-    s.add(swap_count <= 2 * num_plugboard_pairs)
+                maybe_mapping, timeout_marker = _solve_plugboard_constraints(
+                    constraints,
+                    num_plugboard_pairs,
+                    deadline,
+                )
+                if maybe_mapping is timeout_marker:
+                    return None
+                if maybe_mapping is None:
+                    continue
 
-    # Compute symbolic rotor positions
-    pos_L, pos_M, pos_R = _compute_positions(L0, M0, R0, n, notches)
-
-    # Plugboard lookup functions
-    def plug_in_fn(val):
-        if isinstance(val, int):
-            return _z3_lookup_vec(plug, val)
-        return _z3_lookup_vec(plug, val)
-
-    def plug_out_fn(expr):
-        return _z3_lookup_vec(plug, expr)
-
-    # Encryption constraints
-    for i in range(n):
-        p = ord(crib[i]) - ord("A")
-        c = ord(ciphertext[i]) - ord("A")
-
-        encrypted = _encrypt_char_z3(
-            p, pos_L[i], pos_M[i], pos_R[i],
-            r_fwd, r_inv, refl, rings,
-            plug_in_fn=plug_in_fn,
-            plug_out_fn=plug_out_fn,
-        )
-
-        s.add(encrypted == c)
-
-    if s.check() == sat:
-        model = s.model()
-        positions = (
-            model[L0].as_long(),
-            model[M0].as_long(),
-            model[R0].as_long(),
-        )
-        pairs = []
-        for i in range(26):
-            j = model[plug[i]].as_long()
-            if j > i:
-                pairs.append((chr(i + ord("A")), chr(j + ord("A"))))
-        return positions, pairs
+                pairs = []
+                for i in range(26):
+                    j = maybe_mapping.get(i, i)
+                    if j > i:
+                        pairs.append((chr(i + ord("A")), chr(j + ord("A"))))
+                return (left0, middle0, right0), pairs
     return None
 
 
