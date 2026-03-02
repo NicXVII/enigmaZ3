@@ -14,8 +14,10 @@ from z3 import (
     sat, Implies, Not, Function, IntSort,
 )
 
-from enigma.rotor import ROTOR_WIRINGS, ROTOR_NOTCHES
-from enigma.reflector import REFLECTOR_WIRINGS
+from enigma.machine import EnigmaMachine
+from enigma.plugboard import Plugboard
+from enigma.rotor import ROTOR_WIRINGS, ROTOR_NOTCHES, Rotor
+from enigma.reflector import REFLECTOR_WIRINGS, Reflector
 
 
 def _wiring(name: str) -> list[int]:
@@ -50,6 +52,103 @@ def _z3_mod26(expr):
     return expr % 26
 
 
+def _compute_positions(L0, M0, R0, n, notches):
+    """
+    Compute rotor positions for n steps as Z3 expressions.
+    Returns lists of Z3 expressions (pos_L, pos_M, pos_R) each of length n.
+    Positions are AFTER stepping (ready for encryption).
+    """
+    pos_L = []
+    pos_M = []
+    pos_R = []
+
+    for i in range(n):
+        if i == 0:
+            prev_L, prev_M, prev_R = L0, M0, R0
+        else:
+            prev_L, prev_M, prev_R = pos_L[i - 1], pos_M[i - 1], pos_R[i - 1]
+
+        # Double-stepping logic
+        mid_at_notch = (prev_M == notches[1])
+        right_at_notch = (prev_R == notches[2])
+        mid_steps = Or(right_at_notch, mid_at_notch)
+        left_steps = mid_at_notch
+
+        pos_R.append(_z3_mod26(prev_R + 1))
+        pos_M.append(If(mid_steps, _z3_mod26(prev_M + 1), prev_M))
+        pos_L.append(If(left_steps, _z3_mod26(prev_L + 1), prev_L))
+
+    return pos_L, pos_M, pos_R
+
+
+def _encrypt_char_z3(p_val, pL, pM, pR, r_fwd, r_inv, refl, rings,
+                     plug_in_fn=None, plug_out_fn=None, suffix=""):
+    """
+    Build a Z3 expression for encrypting plaintext value p_val through
+    the 3-rotor Enigma with given symbolic positions.
+
+    Parameters
+    ----------
+    p_val : int
+        Plaintext letter (0-25).
+    pL, pM, pR : Z3 expressions
+        Rotor positions (after stepping).
+    r_fwd, r_inv : list[list[int]]
+        Forward and inverse wiring tables [left, mid, right].
+    refl : list[int]
+        Reflector wiring.
+    rings : list[int]
+        Ring settings [left, mid, right].
+    plug_in_fn, plug_out_fn : callable or None
+        Functions that take a Z3 expression and return plugboard-swapped expression.
+        If None, identity is used.
+    suffix : str
+        Name suffix for Z3 expressions (for debugging).
+
+    Returns
+    -------
+    Z3 expression representing the encrypted letter (0-25).
+    """
+    # Plugboard in
+    if plug_in_fn is not None:
+        x = plug_in_fn(p_val)
+    else:
+        x = p_val  # integer constant, no plugboard
+
+    # Forward through right rotor
+    idx_r = _z3_mod26(x + pR - rings[2])
+    x = _z3_mod26(_z3_lookup(r_fwd[2], idx_r) - pR + rings[2])
+
+    # Forward through middle rotor
+    idx_m = _z3_mod26(x + pM - rings[1])
+    x = _z3_mod26(_z3_lookup(r_fwd[1], idx_m) - pM + rings[1])
+
+    # Forward through left rotor
+    idx_l = _z3_mod26(x + pL - rings[0])
+    x = _z3_mod26(_z3_lookup(r_fwd[0], idx_l) - pL + rings[0])
+
+    # Reflector
+    x = _z3_lookup(refl, x)
+
+    # Backward through left rotor
+    idx_l_b = _z3_mod26(x + pL - rings[0])
+    x = _z3_mod26(_z3_lookup(r_inv[0], idx_l_b) - pL + rings[0])
+
+    # Backward through middle rotor
+    idx_m_b = _z3_mod26(x + pM - rings[1])
+    x = _z3_mod26(_z3_lookup(r_inv[1], idx_m_b) - pM + rings[1])
+
+    # Backward through right rotor
+    idx_r_b = _z3_mod26(x + pR - rings[2])
+    x = _z3_mod26(_z3_lookup(r_inv[2], idx_r_b) - pR + rings[2])
+
+    # Plugboard out
+    if plug_out_fn is not None:
+        x = plug_out_fn(x)
+
+    return x
+
+
 # ---------------------------------------------------------------------------
 # Level 1: Crack rotor positions only (no plugboard or known plugboard)
 # ---------------------------------------------------------------------------
@@ -77,145 +176,38 @@ def crack_rotor_positions(
     -------
     tuple (left_pos, mid_pos, right_pos) or None
     """
-    ciphertext = ciphertext.upper().replace(" ", "")
-    crib = crib.upper().replace(" ", "")
+    ciphertext = "".join(ch for ch in ciphertext.upper() if ch.isalpha())
+    crib = "".join(ch for ch in crib.upper() if ch.isalpha())
     n = len(crib)
+    if n == 0 or len(ciphertext) < n:
+        return None
 
-    # Load wirings
-    r_fwd = [_wiring(r) for r in rotor_names]      # [left, mid, right]
-    r_inv = [_inv_wiring(r) for r in rotor_names]
-    refl = _reflector(reflector_name)
-    notches = [ord(ROTOR_NOTCHES[r]) - ord("A") for r in rotor_names]
-    rings = list(ring_settings)
+    target = ciphertext[:n]
+    left_name, middle_name, right_name = rotor_names
+    machine = EnigmaMachine(
+        rotors=[
+            Rotor.from_name(left_name, ring=ring_settings[0]),
+            Rotor.from_name(middle_name, ring=ring_settings[1]),
+            Rotor.from_name(right_name, ring=ring_settings[2]),
+        ],
+        reflector=Reflector.from_name(reflector_name),
+        plugboard=Plugboard(plugboard_pairs),
+    )
 
-    # Plugboard mapping (fixed)
-    plug = list(range(26))
-    if plugboard_pairs:
-        for a, b in plugboard_pairs:
-            ia, ib = ord(a) - ord("A"), ord(b) - ord("A")
-            plug[ia] = ib
-            plug[ib] = ia
-
-    s = Solver()
-
-    # Variables: initial positions
-    L0 = Int("L0")  # left rotor start position
-    M0 = Int("M0")  # middle rotor start position
-    R0 = Int("R0")  # right rotor start position
-    s.add(L0 >= 0, L0 < 26)
-    s.add(M0 >= 0, M0 < 26)
-    s.add(R0 >= 0, R0 < 26)
-
-    # For each character in the crib, simulate the stepping and encryption.
-    # Because the stepping depends on whether rotors are at their notch,
-    # and the notch depends on the (unknown) starting position, we compute
-    # the rotor positions for each step symbolically.
-    # However, for the crib length (typically 10-20 chars), we can just
-    # enumerate all 26^3 = 17576 combinations via constraint per step.
-    # 
-    # More efficient: model each step's position symbolically using If-Then-Else
-    # for the stepping logic.
-
-    # We'll take a pragmatic approach: pre-compute rotor positions for each 
-    # starting combo. But that's 17576 combos × n steps which is large.
-    # 
-    # Better: For short cribs (< ~26 chars), the right rotor steps every time,
-    # middle rotor steps rarely, left rotor almost never.
-    # We model this with symbolic stepping.
-
-    # Build symbolic positions for each step
-    # pos_L[i], pos_M[i], pos_R[i] = positions at step i (after stepping, before encryption)
-    
-    # Step 0: before any key press, positions are L0, M0, R0
-    # At each key press, we step THEN encrypt.
-    
-    # For a practical solver, we enumerate per-step conditions symbolically.
-    # The right rotor always advances. The middle advances if right was at notch.
-    # The left advances if middle was at notch (double-stepping).
-    
-    # We use Z3 Int variables for positions at each step.
-    pos_L = [Int(f"L_{i}") for i in range(n)]
-    pos_M = [Int(f"M_{i}") for i in range(n)]
-    pos_R = [Int(f"R_{i}") for i in range(n)]
-
-    for i in range(n):
-        if i == 0:
-            prev_L, prev_M, prev_R = L0, M0, R0
-        else:
-            prev_L, prev_M, prev_R = pos_L[i - 1], pos_M[i - 1], pos_R[i - 1]
-
-        # Double-stepping logic
-        mid_at_notch = (prev_M == notches[1])  # middle rotor condition
-        right_at_notch = (prev_R == notches[2])   # right rotor condition
-
-        # Middle steps if: right_at_notch OR mid_at_notch (double-step)
-        mid_steps = Or(right_at_notch, mid_at_notch)
-        # Left steps if: mid_at_notch
-        left_steps = mid_at_notch
-
-        s.add(pos_R[i] == _z3_mod26(prev_R + 1))
-        s.add(pos_M[i] == If(mid_steps, _z3_mod26(prev_M + 1), prev_M))
-        s.add(pos_L[i] == If(left_steps, _z3_mod26(prev_L + 1), prev_L))
-
-    # Now, for each crib character, add encryption constraints
-    for i in range(n):
-        p = ord(crib[i]) - ord("A")
-        c = ord(ciphertext[i]) - ord("A")
-
-        # Apply plugboard (fixed)
-        p_after_plug = plug[p]
-
-        # We need to encode the full path through 3 rotors + reflector + 3 rotors back
-        # with symbolic rotor positions. We enumerate all possible position combos.
-        # Since there are 26^3 possible position combos at each step, that's too many.
-        # Instead, we use nested ITE chains (If-Then-Else).
-
-        # For each rotor, the forward function is:
-        #   fwd(x, pos, ring) = (rotor_fwd[(x + pos - ring) % 26] - pos + ring) % 26
-        # We encode this as a Z3 expression.
-
-        # Build encryption path as Z3 expressions
-        x = p_after_plug  # integer constant
-
-        # Forward through right rotor
-        idx_r = _z3_mod26(x + pos_R[i] - rings[2])
-        x_after_r_fwd = _z3_mod26(_z3_lookup(r_fwd[2], idx_r, f"rf{i}") - pos_R[i] + rings[2])
-
-        # Forward through middle rotor
-        idx_m = _z3_mod26(x_after_r_fwd + pos_M[i] - rings[1])
-        x_after_m_fwd = _z3_mod26(_z3_lookup(r_fwd[1], idx_m, f"mf{i}") - pos_M[i] + rings[1])
-
-        # Forward through left rotor
-        idx_l = _z3_mod26(x_after_m_fwd + pos_L[i] - rings[0])
-        x_after_l_fwd = _z3_mod26(_z3_lookup(r_fwd[0], idx_l, f"lf{i}") - pos_L[i] + rings[0])
-
-        # Reflector
-        x_after_refl = _z3_lookup(refl, x_after_l_fwd, f"refl{i}")
-
-        # Backward through left rotor
-        idx_l_b = _z3_mod26(x_after_refl + pos_L[i] - rings[0])
-        x_after_l_bwd = _z3_mod26(_z3_lookup(r_inv[0], idx_l_b, f"lb{i}") - pos_L[i] + rings[0])
-
-        # Backward through middle rotor
-        idx_m_b = _z3_mod26(x_after_l_bwd + pos_M[i] - rings[1])
-        x_after_m_bwd = _z3_mod26(_z3_lookup(r_inv[1], idx_m_b, f"mb{i}") - pos_M[i] + rings[1])
-
-        # Backward through right rotor
-        idx_r_b = _z3_mod26(x_after_m_bwd + pos_R[i] - rings[2])
-        x_after_r_bwd = _z3_mod26(_z3_lookup(r_inv[2], idx_r_b, f"rb{i}") - pos_R[i] + rings[2])
-
-        # Apply plugboard out
-        expected = _z3_lookup(plug, x_after_r_bwd, f"plugout{i}")
-
-        s.add(expected == c)
-
-    if s.check() == sat:
-        model = s.model()
-        return (
-            model[L0].as_long(),
-            model[M0].as_long(),
-            model[R0].as_long(),
-        )
+    # Exhaustive search over all 26^3 start positions.
+    # This is fast in practice for crib lengths used in the tests and avoids
+    # expensive SMT solving for this specific task.
+    for left_pos in range(26):
+        for middle_pos in range(26):
+            for right_pos in range(26):
+                machine.reset((left_pos, middle_pos, right_pos))
+                matched = True
+                for i, p_char in enumerate(crib):
+                    if machine.encrypt_char(p_char) != target[i]:
+                        matched = False
+                        break
+                if matched:
+                    return (left_pos, middle_pos, right_pos)
     return None
 
 
@@ -230,6 +222,7 @@ def crack_with_plugboard(
     reflector_name: str = "B",
     num_plugboard_pairs: int = 3,
     ring_settings: tuple[int, int, int] = (0, 0, 0),
+    solver_timeout_ms: int | None = 10_000,
 ) -> tuple[tuple[int, int, int], list[tuple[str, str]]] | None:
     """
     Find rotor positions AND plugboard pairs.
@@ -250,9 +243,17 @@ def crack_with_plugboard(
     -------
     tuple of (positions, plugboard_pairs) or None
     """
-    ciphertext = ciphertext.upper().replace(" ", "")
-    crib = crib.upper().replace(" ", "")
+    ciphertext = "".join(ch for ch in ciphertext.upper() if ch.isalpha())
+    crib = "".join(ch for ch in crib.upper() if ch.isalpha())
     n = len(crib)
+    if n == 0 or len(ciphertext) < n:
+        return None
+
+    # Enigma invariant: a letter cannot encrypt to itself (with reflector path).
+    # If violated at any crib position, no configuration can satisfy constraints.
+    for i in range(n):
+        if crib[i] == ciphertext[i]:
+            return None
 
     r_fwd = [_wiring(r) for r in rotor_names]
     r_inv = [_inv_wiring(r) for r in rotor_names]
@@ -261,6 +262,8 @@ def crack_with_plugboard(
     rings = list(ring_settings)
 
     s = Solver()
+    if solver_timeout_ms is not None:
+        s.set(timeout=solver_timeout_ms)
 
     # Rotor start positions
     L0 = Int("L0")
@@ -270,84 +273,44 @@ def crack_with_plugboard(
     s.add(M0 >= 0, M0 < 26)
     s.add(R0 >= 0, R0 < 26)
 
-    # Plugboard as a Z3 function: plug[i] = j means letter i is swapped with j
-    # We model it as 26 Int variables
+    # Plugboard as 26 Int variables
     plug = IntVector("plug", 26)
     for i in range(26):
         s.add(plug[i] >= 0, plug[i] < 26)
 
     # Plugboard must be an involution: plug[plug[i]] == i
     for i in range(26):
-        s.add(_z3_lookup_vec(plug, _z3_lookup_vec(plug, i), f"inv_{i}") == i)
+        s.add(_z3_lookup_vec(plug, _z3_lookup_vec(plug, i)) == i)
 
     # At most num_plugboard_pairs swaps (rest are identity)
-    # Count the number of letters that are NOT mapped to themselves
     swap_count = sum([If(plug[i] != i, 1, 0) for i in range(26)])
     s.add(swap_count <= 2 * num_plugboard_pairs)
 
-    # Each swapped pair: if plug[i] != i, then plug[i] > i (canonical form to break symmetry)
-    # This isn't strictly necessary but helps
-    for i in range(26):
-        s.add(Implies(plug[i] != i, plug[i] > i))
+    # Compute symbolic rotor positions
+    pos_L, pos_M, pos_R = _compute_positions(L0, M0, R0, n, notches)
 
-    # Rotor positions (symbolic stepping)
-    pos_L = [Int(f"L_{i}") for i in range(n)]
-    pos_M = [Int(f"M_{i}") for i in range(n)]
-    pos_R = [Int(f"R_{i}") for i in range(n)]
+    # Plugboard lookup functions
+    def plug_in_fn(val):
+        if isinstance(val, int):
+            return _z3_lookup_vec(plug, val)
+        return _z3_lookup_vec(plug, val)
 
-    for i in range(n):
-        prev_L = L0 if i == 0 else pos_L[i - 1]
-        prev_M = M0 if i == 0 else pos_M[i - 1]
-        prev_R = R0 if i == 0 else pos_R[i - 1]
+    def plug_out_fn(expr):
+        return _z3_lookup_vec(plug, expr)
 
-        mid_at_notch = (prev_M == notches[1])
-        right_at_notch = (prev_R == notches[2])
-        mid_steps = Or(right_at_notch, mid_at_notch)
-        left_steps = mid_at_notch
-
-        s.add(pos_R[i] == _z3_mod26(prev_R + 1))
-        s.add(pos_M[i] == If(mid_steps, _z3_mod26(prev_M + 1), prev_M))
-        s.add(pos_L[i] == If(left_steps, _z3_mod26(prev_L + 1), prev_L))
-
-    # Encryption constraints for each crib character
+    # Encryption constraints
     for i in range(n):
         p = ord(crib[i]) - ord("A")
         c = ord(ciphertext[i]) - ord("A")
 
-        # Plugboard in (symbolic)
-        x_after_plug_in = _z3_lookup_vec(plug, p, f"plugin_{i}")
+        encrypted = _encrypt_char_z3(
+            p, pos_L[i], pos_M[i], pos_R[i],
+            r_fwd, r_inv, refl, rings,
+            plug_in_fn=plug_in_fn,
+            plug_out_fn=plug_out_fn,
+        )
 
-        # Forward through right rotor
-        idx_r = _z3_mod26(x_after_plug_in + pos_R[i] - rings[2])
-        x_after_r_fwd = _z3_mod26(_z3_lookup(r_fwd[2], idx_r, f"rf{i}") - pos_R[i] + rings[2])
-
-        # Forward through middle rotor
-        idx_m = _z3_mod26(x_after_r_fwd + pos_M[i] - rings[1])
-        x_after_m_fwd = _z3_mod26(_z3_lookup(r_fwd[1], idx_m, f"mf{i}") - pos_M[i] + rings[1])
-
-        # Forward through left rotor
-        idx_l = _z3_mod26(x_after_m_fwd + pos_L[i] - rings[0])
-        x_after_l_fwd = _z3_mod26(_z3_lookup(r_fwd[0], idx_l, f"lf{i}") - pos_L[i] + rings[0])
-
-        # Reflector
-        x_after_refl = _z3_lookup(refl, x_after_l_fwd, f"refl{i}")
-
-        # Backward through left rotor
-        idx_l_b = _z3_mod26(x_after_refl + pos_L[i] - rings[0])
-        x_after_l_bwd = _z3_mod26(_z3_lookup(r_inv[0], idx_l_b, f"lb{i}") - pos_L[i] + rings[0])
-
-        # Backward through middle rotor
-        idx_m_b = _z3_mod26(x_after_l_bwd + pos_M[i] - rings[1])
-        x_after_m_bwd = _z3_mod26(_z3_lookup(r_inv[1], idx_m_b, f"mb{i}") - pos_M[i] + rings[1])
-
-        # Backward through right rotor
-        idx_r_b = _z3_mod26(x_after_m_bwd + pos_R[i] - rings[2])
-        x_after_r_bwd = _z3_mod26(_z3_lookup(r_inv[2], idx_r_b, f"rb{i}") - pos_R[i] + rings[2])
-
-        # Plugboard out (symbolic)
-        x_final = _z3_lookup_vec(plug, x_after_r_bwd, f"plugout_{i}")
-
-        s.add(x_final == c)
+        s.add(encrypted == c)
 
     if s.check() == sat:
         model = s.model()

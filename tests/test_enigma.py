@@ -3,6 +3,14 @@ Tests for all phases of the Enigma project.
 Run with: pytest tests/ -v
 """
 
+from pathlib import Path
+import sys
+
+# Allow direct execution from tests/ (python test_enigma.py) by exposing repo root.
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 import pytest
 from enigma.rotor import Rotor
 from enigma.reflector import Reflector
