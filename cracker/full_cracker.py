@@ -12,14 +12,11 @@ lookup tables encoded as If-Then-Else chains, combined with modular arithmetic.
 import time
 
 from z3 import (
-    Int, IntVector, Solver, And, Or, If, Distinct,
-    sat, Implies, Not, Function, IntSort,
+    Int, Solver, Or, If, sat,
 )
 
-from enigma.machine import EnigmaMachine
-from enigma.plugboard import Plugboard
-from enigma.rotor import ROTOR_WIRINGS, ROTOR_NOTCHES, Rotor
-from enigma.reflector import REFLECTOR_WIRINGS, Reflector
+from enigma.rotor import ROTOR_WIRINGS, ROTOR_NOTCHES
+from enigma.reflector import REFLECTOR_WIRINGS
 
 
 def _wiring(name: str) -> list[int]:
@@ -185,31 +182,65 @@ def crack_rotor_positions(
         return None
 
     target = ciphertext[:n]
-    left_name, middle_name, right_name = rotor_names
-    machine = EnigmaMachine(
-        rotors=[
-            Rotor.from_name(left_name, ring=ring_settings[0]),
-            Rotor.from_name(middle_name, ring=ring_settings[1]),
-            Rotor.from_name(right_name, ring=ring_settings[2]),
-        ],
-        reflector=Reflector.from_name(reflector_name),
-        plugboard=Plugboard(plugboard_pairs),
+    r_fwd = [_wiring(r) for r in rotor_names]
+    r_inv = [_inv_wiring(r) for r in rotor_names]
+    refl = _reflector(reflector_name)
+    notches = [ord(ROTOR_NOTCHES[r]) - ord("A") for r in rotor_names]
+    rings = list(ring_settings)
+
+    plug_table = list(range(26))
+    if plugboard_pairs:
+        for a, b in plugboard_pairs:
+            ia = ord(a.upper()) - ord("A")
+            ib = ord(b.upper()) - ord("A")
+            if not (0 <= ia < 26 and 0 <= ib < 26):
+                return None
+            plug_table[ia] = ib
+            plug_table[ib] = ia
+
+    crib_vals = [ord(ch) - ord("A") for ch in crib]
+    target_vals = [ord(ch) - ord("A") for ch in target]
+
+    s = Solver()
+    left0 = Int("left0")
+    middle0 = Int("middle0")
+    right0 = Int("right0")
+    s.add(left0 >= 0, left0 < 26)
+    s.add(middle0 >= 0, middle0 < 26)
+    s.add(right0 >= 0, right0 < 26)
+
+    pos_left, pos_middle, pos_right = _compute_positions(
+        left0,
+        middle0,
+        right0,
+        n,
+        notches,
     )
 
-    # Exhaustive search over all 26^3 start positions.
-    # This is fast in practice for crib lengths used in the tests and avoids
-    # expensive SMT solving for this specific task.
-    for left_pos in range(26):
-        for middle_pos in range(26):
-            for right_pos in range(26):
-                machine.reset((left_pos, middle_pos, right_pos))
-                matched = True
-                for i, p_char in enumerate(crib):
-                    if machine.encrypt_char(p_char) != target[i]:
-                        matched = False
-                        break
-                if matched:
-                    return (left_pos, middle_pos, right_pos)
+    for i in range(n):
+        # With known plugboard P, c = P(core(P(p))) so we constrain:
+        # core(P(p)) == P(c), where core is rotors+reflector only.
+        p_core = plug_table[crib_vals[i]]
+        c_core = plug_table[target_vals[i]]
+        enc = _encrypt_char_z3(
+            p_core,
+            pos_left[i],
+            pos_middle[i],
+            pos_right[i],
+            r_fwd,
+            r_inv,
+            refl,
+            rings,
+        )
+        s.add(enc == c_core)
+
+    if s.check() == sat:
+        m = s.model()
+        return (
+            m[left0].as_long(),
+            m[middle0].as_long(),
+            m[right0].as_long(),
+        )
     return None
 
 
