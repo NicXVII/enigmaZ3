@@ -159,6 +159,7 @@ def crack_rotor_positions(
     reflector_name: str = "B",
     plugboard_pairs: list[tuple[str, str]] | None = None,
     ring_settings: tuple[int, int, int] = (0, 0, 0),
+    solver_timeout_ms: int | None = 50,
 ) -> tuple[int, int, int] | None:
     """
     Find the initial positions of 3 rotors given a crib.
@@ -202,6 +203,8 @@ def crack_rotor_positions(
     target_vals = [ord(ch) - ord("A") for ch in target]
 
     s = Solver()
+    if solver_timeout_ms is not None:
+        s.set(timeout=solver_timeout_ms)
     left0 = Int("left0")
     middle0 = Int("middle0")
     right0 = Int("right0")
@@ -234,13 +237,48 @@ def crack_rotor_positions(
         )
         s.add(enc == c_core)
 
-    if s.check() == sat:
+    check_res = s.check()
+    if check_res == sat:
         m = s.model()
-        return (
+        candidate = (
             m[left0].as_long(),
             m[middle0].as_long(),
             m[right0].as_long(),
         )
+        if _matches_candidate_numeric(
+            candidate[0],
+            candidate[1],
+            candidate[2],
+            crib_vals,
+            target_vals,
+            plug_table,
+            r_fwd,
+            r_inv,
+            refl,
+            rings,
+            notches,
+        ):
+            return candidate
+
+    # Fallback: deterministic numeric search. On this problem class it is
+    # consistently faster and more reliable than full SMT solving.
+    for left_pos in range(26):
+        for middle_pos in range(26):
+            for right_pos in range(26):
+                if _matches_candidate_numeric(
+                    left_pos,
+                    middle_pos,
+                    right_pos,
+                    crib_vals,
+                    target_vals,
+                    plug_table,
+                    r_fwd,
+                    r_inv,
+                    refl,
+                    rings,
+                    notches,
+                ):
+                    return (left_pos, middle_pos, right_pos)
     return None
 
 
@@ -318,6 +356,44 @@ def _encrypt_core_numeric(
     idx_r_b = (x + pos_right - rings[2]) % 26
     x = (r_inv[2][idx_r_b] - pos_right + rings[2]) % 26
     return x
+
+
+def _matches_candidate_numeric(
+    left0: int,
+    middle0: int,
+    right0: int,
+    crib_vals: list[int],
+    cipher_vals: list[int],
+    plug_table: list[int],
+    r_fwd: list[list[int]],
+    r_inv: list[list[int]],
+    refl: list[int],
+    rings: list[int],
+    notches: list[int],
+) -> bool:
+    """
+    Check whether one rotor-start candidate satisfies all crib constraints.
+    """
+    n = len(crib_vals)
+    pos_left, pos_middle, pos_right = _compute_positions_numeric(
+        left0, middle0, right0, n, notches
+    )
+    for i in range(n):
+        p_core = plug_table[crib_vals[i]]
+        c_core = plug_table[cipher_vals[i]]
+        out = _encrypt_core_numeric(
+            p_core,
+            pos_left[i],
+            pos_middle[i],
+            pos_right[i],
+            r_fwd,
+            r_inv,
+            refl,
+            rings,
+        )
+        if out != c_core:
+            return False
+    return True
 
 
 def _assign_plug_pair(
