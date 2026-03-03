@@ -14,6 +14,7 @@ import itertools
 import time
 from dataclasses import dataclass
 from functools import lru_cache
+from typing import Callable
 
 from z3 import If, Int, Or, Solver, sat
 
@@ -303,17 +304,28 @@ def crack_rotor_positions(
     solver_timeout_ms: int | None = 50,
     allow_numeric_fallback: bool = True,
     numeric_search_limit: int | None = None,
+    progress_callback: Callable[[str], None] | None = None,
 ) -> tuple[int, int, int] | None:
     """
     Find initial positions of 3 rotors given a crib.
 
     `allow_numeric_fallback=False` can be used for fast, timeout-bounded probing.
     """
+    def emit(message: str):
+        if progress_callback is not None:
+            progress_callback(message)
+
     ciphertext_n = _normalize_alpha(ciphertext)
     crib_n = _normalize_alpha(crib)
     n = len(crib_n)
     if n == 0 or len(ciphertext_n) < n:
+        emit("Input validation failed: empty crib or ciphertext shorter than crib.")
         return None
+
+    emit(
+        f"Step 1/7 normalize input: crib_len={n}, ciphertext_len={len(ciphertext_n)}, "
+        f"using first {n} ciphertext chars."
+    )
 
     target = ciphertext_n[:n]
     r_fwd = tuple(_wiring(r) for r in rotor_names)
@@ -321,9 +333,15 @@ def crack_rotor_positions(
     refl = _reflector(reflector_name)
     notches = tuple(ord(ROTOR_NOTCHES[r]) - ord("A") for r in rotor_names)
     rings = tuple(ring_settings)
+    emit(
+        "Step 2/7 load machine constants: "
+        f"rotors={rotor_names}, reflector={reflector_name}, rings={rings}, "
+        f"timeout_ms={solver_timeout_ms}."
+    )
 
     plug_table = _build_plug_table(plugboard_pairs)
     if plug_table is None:
+        emit("Plugboard validation failed: invalid/conflicting pairs.")
         return None
 
     crib_vals = [ord(ch) - ord("A") for ch in crib_n]
@@ -339,8 +357,10 @@ def crack_rotor_positions(
     s.add(left0 >= 0, left0 < 26)
     s.add(middle0 >= 0, middle0 < 26)
     s.add(right0 >= 0, right0 < 26)
+    emit("Step 3/7 create symbolic vars: left0, middle0, right0 each constrained to [0,25].")
 
     pos_left, pos_middle, pos_right = _compute_positions(left0, middle0, right0, n, notches)
+    emit(f"Step 4/7 build {n} symbolic encryption constraints from crib/ciphertext pairs.")
 
     for i in range(n):
         p_core = plug_table[crib_vals[i]]
@@ -356,14 +376,27 @@ def crack_rotor_positions(
             rings,
         )
         s.add(enc == c_core)
+        if i < 12:
+            emit(
+                f"  constraint {i + 1:02d}: enc('{crib_n[i]}') == '{target[i]}' "
+                "(after plugboard mapping)."
+            )
+    if n > 12:
+        emit(f"  ... {n - 12} additional constraints omitted from log.")
 
+    emit("Step 5/7 ask Z3 for SAT model (check()).")
     check_res = s.check()
+    emit(f"  solver result: {check_res}.")
     if check_res == sat:
         model = s.model()
         candidate = (
             model[left0].as_long(),
             model[middle0].as_long(),
             model[right0].as_long(),
+        )
+        emit(
+            "Step 6/7 model extracted: "
+            f"left0={candidate[0]}, middle0={candidate[1]}, right0={candidate[2]}."
         )
         if _matches_candidate_numeric(
             candidate[0],
@@ -378,12 +411,27 @@ def crack_rotor_positions(
             rings,
             notches,
         ):
+            emit("  numeric replay verification passed.")
             return candidate
+        emit("  numeric replay verification failed, candidate rejected.")
+    else:
+        emit("Step 6/7 no direct SAT model from Z3; skipping model verification.")
 
     if not allow_numeric_fallback:
+        emit("Step 7/7 numeric fallback disabled. Returning None.")
         return None
 
+    total_candidates = 26 * 26 * 26
+    if numeric_search_limit is not None and numeric_search_limit < total_candidates:
+        total_candidates = numeric_search_limit
+    progress_every = max(1, total_candidates // 4)
+    emit(f"Step 7/7 fallback numeric search over up to {total_candidates} candidates.")
+
+    tested = 0
     for left_pos, middle_pos, right_pos in _iter_position_candidates(numeric_search_limit):
+        tested += 1
+        if tested % progress_every == 0:
+            emit(f"  fallback progress: tested {tested}/{total_candidates} candidates.")
         if _matches_candidate_numeric(
             left_pos,
             middle_pos,
@@ -397,7 +445,12 @@ def crack_rotor_positions(
             rings,
             notches,
         ):
+            emit(
+                "  fallback found candidate: "
+                f"left0={left_pos}, middle0={middle_pos}, right0={right_pos}."
+            )
             return (left_pos, middle_pos, right_pos)
+    emit("  fallback exhausted candidates with no solution.")
     return None
 
 
