@@ -24,3 +24,5 @@ Thumbs.db
 
 # Local runtime artifacts
 *.log
+benchmark_results.csv
+profiling/

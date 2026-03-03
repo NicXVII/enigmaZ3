@@ -1,165 +1,172 @@
-# enigmaZ3 — Simulatore Enigma + Cracker Ibrido (Z3 + Ricerca)
+# enigmaZ3 - Enigma simulator and hybrid cracker (Z3 + search)
 
-Simulazione della macchina Enigma in Python con cracking a complessita incrementale.
+Simulatore Enigma in Python con cracking incrementale:
+- simulazione fedele a 3 rotori (double-stepping, ring settings, plugboard)
+- cracking posizioni rotori
+- cracking con plugboard ignoto
+- ricerca configurazione completa con ordine rotori ignoto e ring settings ignoti
 
-Stato attuale (aggiornato al 3 marzo 2026):
-- `simple_cracker.py`: usa Z3 in modo diretto (SMT puro) per la versione a 1 rotore.
-- `full_cracker.py`:
-  - `crack_rotor_positions`: tenta prima SMT su posizioni iniziali (`left0`, `middle0`, `right0`) con timeout breve, poi fallback numerico deterministico.
-  - `crack_with_plugboard`: ricerca numerica su posizioni rotori + backtracking vincolato per plugboard ignoto.
+## Stato attuale (3 marzo 2026)
 
-Nota: questo progetto non implementa la procedura storica completa della Bombe di Turing (menu/cicli elettromeccanici).
+1. Test coverage estesa su meccanica Enigma e cracking.
+2. Cracker completo con ranking candidati e timeout globale chiaro.
+3. Ottimizzazioni prestazionali (cache tabelle core + pruning/early-stop).
+4. CLI unica (`encrypt`, `decrypt`, `crack`, `benchmark`) con validazione input.
+5. Pipeline quality/release con CI, coverage, lint e type-check.
 
-## Struttura del progetto
-
-```
-enigmaZ3/
-├── enigma/                  # Simulatore Enigma
-│   ├── __init__.py
-│   ├── rotor.py             # Rotori (wirings storici I-V, stepping, ring settings)
-│   ├── reflector.py         # Riflettori (B, C)
-│   ├── plugboard.py         # Plugboard (Steckerbrett)
-│   └── machine.py           # SimpleEnigma (1 rotore) + EnigmaMachine (3 rotori)
-├── cracker/                 # Cracker (SMT + ricerca numerica)
-│   ├── __init__.py
-│   ├── simple_cracker.py    # SMT puro per Enigma semplificata (1 rotore)
-│   └── full_cracker.py      # Cracker ibrido per Enigma completa (3 rotori + plugboard)
-├── tests/
-│   └── test_enigma.py       # Test per tutte le fasi
-├── benchmark.py             # Benchmark tempi cracking + grafici matplotlib
-├── work.md                  # Piano di lavoro
-└── README.md
-```
-
-## Requisiti
-
-1. Crea e attiva un virtual environment:
+## Setup rapido
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
+pip install -r requirements-dev.txt
 ```
 
-2. Installa dipendenze:
+## CLI
+
+### Encrypt / Decrypt
 
 ```bash
-pip install z3-solver matplotlib pytest
+python enigma_cli.py encrypt \
+  --text "HELLOWORLD" \
+  --rotors I,II,III \
+  --positions 5,10,20 \
+  --rings 0,0,0 \
+  --reflector B \
+  --plugboard AZ,BY
 ```
 
-## Fasi del progetto
+`decrypt` usa gli stessi parametri (Enigma e simmetrica):
 
-### Fase 1 — Simulatore Enigma base
-Versione semplificata con un solo rotore e riflettore, senza plugboard.
-- Cifratura e decifratura sono la stessa operazione (proprietà dell'Enigma)
-- Nessuna lettera si cifra in sé stessa
-
-### Fase 2 — Z3 cracker (versione base)
-Dato un ciphertext e un crib (testo in chiaro noto), Z3 trova la posizione iniziale del rotore.
-Il solver modella la cifratura come vincoli aritmetici modulo 26.
-
-### Fase 3 — Enigma completa
-3 rotori (I, II, III) + riflettore B + plugboard con meccanismo di double-stepping.
-Parametri storici reali della Wehrmacht.
-
-### Fase 4 — Cracker completo (ibrido)
-Tre livelli incrementali:
-1. **Solo posizioni rotori** — `crack_rotor_positions` (SMT con fallback numerico)
-2. **Rotori + plugboard noto** — stessa funzione, con vincoli plugboard noti
-3. **Rotori + plugboard sconosciuto** — `crack_with_plugboard` (ricerca numerica + backtracking)
-
-### Fase 5 — Benchmark e grafici
-Misura dei tempi di cracking al variare di:
-- Lunghezza del crib (3-15 caratteri)
-- Numero di coppie plugboard (0-3)
-
-## Utilizzo
-
-### Cifrare un messaggio
-
-```python
-from enigma import Rotor, Reflector, Plugboard, EnigmaMachine
-
-# Configura: rotori I, II, III — posizioni 5, 10, 20 — riflettore B
-rotors = [
-    Rotor.from_name("I", position=5),
-    Rotor.from_name("II", position=10),
-    Rotor.from_name("III", position=20),
-]
-reflector = Reflector.from_name("B")
-plugboard = Plugboard([("A", "Z"), ("B", "Y"), ("C", "X")])
-
-machine = EnigmaMachine(rotors, reflector, plugboard)
-ciphertext = machine.process("HELLOWORLD")
-print(ciphertext)
+```bash
+python enigma_cli.py decrypt --text "<CIPHERTEXT>" --rotors I,II,III --positions 5,10,20
 ```
 
-### Crackare posizioni rotori (ibrido)
+### Crack
+
+Crack solo posizioni (plugboard noto o assente):
+
+```bash
+python enigma_cli.py crack \
+  --mode positions \
+  --ciphertext "XYZ..." \
+  --crib "WETTERBERICHT" \
+  --rotors I,II,III \
+  --rings 0,0,0 \
+  --plugboard AZ,BY
+```
+
+Crack con plugboard ignoto:
+
+```bash
+python enigma_cli.py crack \
+  --mode plugboard \
+  --ciphertext "XYZ..." \
+  --crib "WETTERBERICHT" \
+  --rotors I,II,III \
+  --num-pairs 3 \
+  --timeout-ms 8000
+```
+
+Ricerca completa (ordine rotori + ring ignoti) con ranking:
+
+```bash
+python enigma_cli.py crack \
+  --mode full \
+  --ciphertext "XYZ..." \
+  --crib "WETTERBERICHT" \
+  --rotor-pool I,II,III \
+  --search-rings \
+  --top-k 5 \
+  --timeout-ms 3000
+```
+
+### Benchmark
+
+```bash
+python enigma_cli.py benchmark --csv benchmark_results.csv --png benchmark_results.png
+```
+
+## API principali
+
+- `crack_rotor_positions(...)`
+- `crack_with_plugboard(...)`
+- `rank_rotor_configurations(...)`
+- `crack_full_configuration(...)`
+
+Esempio Python rapido:
 
 ```python
-from cracker import crack_rotor_positions
+from cracker.full_cracker import crack_full_configuration
 
-# Dato un ciphertext e un crib, trova le posizioni dei rotori.
-# Strategia: SMT con timeout breve + fallback numerico.
-positions = crack_rotor_positions(
-    ciphertext="XYZABCDEFG",  # il tuo ciphertext
-    crib="WETTERBERIC",       # testo in chiaro noto
-    rotor_names=("I", "II", "III"),
-    reflector_name="B",
-    solver_timeout_ms=50,     # opzionale
+best = crack_full_configuration(
+    ciphertext="...",
+    crib="WETTERBERICHT",
+    rotor_pool=("I", "II", "III"),
+    search_rotor_order=True,
+    search_ring_settings=True,
+    global_timeout_ms=5000,
 )
-print(f"Posizioni trovate: {positions}")
+print(best)
 ```
 
-### Eseguire i test
+## Test e quality
 
-Dal root del repository:
+Test completi:
 
 ```bash
 pytest tests/ -v
 ```
 
-Se sei gia dentro `tests/`, usa invece:
+Suite quality locale:
 
 ```bash
-pytest -v
+./scripts/run_quality.sh
 ```
 
-`python test_enigma.py` non esegue i test pytest automaticamente.
-
-### Eseguire i benchmark
+Release check locale (quality + benchmark + profiling):
 
 ```bash
-python benchmark.py
+./scripts/release.sh
 ```
 
-Produce il file `benchmark_results.png` con i grafici dei tempi.
+Profiling specifico full cracker:
 
-## Come funziona il cracking
+```bash
+python scripts/profile_full_cracker.py
+```
 
-### `simple_cracker.py` (1 rotore)
-- Modello SMT diretto con Z3.
-- Variabile simbolica della posizione iniziale, vincoli per ogni lettera del crib.
+Output profiling: `profiling/full_cracker_profile.txt`.
 
-### `full_cracker.py` — `crack_rotor_positions`
-- Costruisce un modello SMT per le posizioni iniziali dei 3 rotori.
-- Modella stepping (double-stepping) e passaggio del segnale con lookup ITE.
-- Usa timeout sul solver; se non ottiene un candidato valido in tempo, usa fallback esaustivo numerico (`26^3`) con verifica deterministica.
+## CI
 
-### `full_cracker.py` — `crack_with_plugboard`
-- Cerca posizioni rotori numericamente.
-- Per ogni candidato, risolve i vincoli plugboard con backtracking su una mappatura involutiva.
-- Include pruning e timeout globale.
+Workflow GitHub Actions in `.github/workflows/ci.yml`:
+- test con coverage
+- lint (`ruff`)
+- type-check (`mypy`)
 
-## Limitazioni attuali
+## Struttura progetto
 
-- Non implementa l'algoritmo storico completo della Bombe (menu/loop/cycle detection).
-- Il cracking completo con plugboard ignoto non e modellato interamente in SMT.
-
-## Parametri storici
-
-| Componente | Wiring |
-|------------|--------|
-| Rotore I   | `EKMFLGDQVZNTOWYHXUSPAIBRCJ` (notch: Q) |
-| Rotore II  | `AJDKSIRUXBLHWTMCQGZNPYFVOE` (notch: E) |
-| Rotore III | `BDFHJLCPRTXVZNYEIWGAKMUSQO` (notch: V) |
-| Riflettore B | `YRUHQSLDPXNGOKMIEBFZCWVJAT` |
+```
+enigmaZ3/
+├── enigma/
+│   ├── rotor.py
+│   ├── reflector.py
+│   ├── plugboard.py
+│   └── machine.py
+├── cracker/
+│   ├── simple_cracker.py
+│   └── full_cracker.py
+├── tests/
+│   └── test_enigma.py
+├── enigma_cli.py
+├── benchmark.py
+├── scripts/
+│   ├── run_quality.sh
+│   ├── release.sh
+│   └── profile_full_cracker.py
+├── requirements.txt
+├── requirements-dev.txt
+├── pyproject.toml
+└── .github/workflows/ci.yml
+```
