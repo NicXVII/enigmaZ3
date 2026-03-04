@@ -1,30 +1,48 @@
 # enigmaZ3 - Enigma simulator and hybrid cracker (Z3 + search)
 
-Simulatore Enigma in Python con cracking incrementale:
-- simulazione fedele a 3 rotori (double-stepping, ring settings, plugboard)
-- cracking posizioni rotori
-- cracking con plugboard ignoto
-- ricerca configurazione completa con ordine rotori ignoto e ring settings ignoti
+Progetto Python che combina simulazione Enigma a 3 rotori e cracking incrementale basato su Z3, fallback numerico e ranking euristico.
 
-## Stato attuale (3 marzo 2026)
+## Funzionalita
 
-1. Test coverage estesa su meccanica Enigma e cracking.
-2. Cracker completo con ranking candidati e timeout globale chiaro.
-3. Ottimizzazioni prestazionali (cache tabelle core + pruning/early-stop).
-4. CLI unica (`encrypt`, `decrypt`, `crack`, `benchmark`) con validazione input.
-5. Pipeline quality/release con CI, coverage, lint e type-check.
+- Simulatore Enigma completo con double-stepping, ring settings e plugboard.
+- Rotori supportati: `I`, `II`, `III`, `IV`, `V`.
+- Riflettori supportati: `B`, `C`.
+- Cracking posizioni rotori (`crack_rotor_positions`).
+- Cracking con plugboard ignoto (`crack_with_plugboard`).
+- Ricerca completa con ordine rotori e ring settings ignoti (`rank_rotor_configurations`, `crack_full_configuration`).
+- CLI unificata: `encrypt`, `decrypt`, `crack`, `benchmark`.
+- Demo interattiva terminale per presentazioni orali (`interactive_demo.py`).
 
-## Setup rapido
+## Requisiti
+
+- Python 3.12 consigliato.
+- Dipendenze runtime: `z3-solver`, `matplotlib`.
+
+## Installazione
+
+Setup minimo:
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+Setup sviluppo (test, coverage, lint, type-check):
+
+```bash
 pip install -r requirements-dev.txt
 ```
 
-## CLI
+## Uso CLI
 
-### Encrypt / Decrypt
+Help generale:
+
+```bash
+python enigma_cli.py --help
+```
+
+Encrypt:
 
 ```bash
 python enigma_cli.py encrypt \
@@ -36,15 +54,19 @@ python enigma_cli.py encrypt \
   --plugboard AZ,BY
 ```
 
-`decrypt` usa gli stessi parametri (Enigma e simmetrica):
+Decrypt usa gli stessi parametri (Enigma e simmetrica):
 
 ```bash
-python enigma_cli.py decrypt --text "<CIPHERTEXT>" --rotors I,II,III --positions 5,10,20
+python enigma_cli.py decrypt \
+  --text "<CIPHERTEXT>" \
+  --rotors I,II,III \
+  --positions 5,10,20 \
+  --rings 0,0,0 \
+  --reflector B \
+  --plugboard AZ,BY
 ```
 
-### Crack
-
-Crack solo posizioni (plugboard noto o assente):
+Crack modalita `positions` (plugboard noto o assente):
 
 ```bash
 python enigma_cli.py crack \
@@ -53,10 +75,13 @@ python enigma_cli.py crack \
   --crib "WETTERBERICHT" \
   --rotors I,II,III \
   --rings 0,0,0 \
-  --plugboard AZ,BY
+  --plugboard AZ,BY \
+  --timeout-ms 3000
 ```
 
-Crack con plugboard ignoto:
+Output: JSON con campo `positions`.
+
+Crack modalita `plugboard` (plugboard ignoto, numero coppie noto):
 
 ```bash
 python enigma_cli.py crack \
@@ -64,40 +89,75 @@ python enigma_cli.py crack \
   --ciphertext "XYZ..." \
   --crib "WETTERBERICHT" \
   --rotors I,II,III \
+  --rings 0,0,0 \
   --num-pairs 3 \
   --timeout-ms 8000
 ```
 
-Ricerca completa (ordine rotori + ring ignoti) con ranking:
+Output: JSON con `positions` e `plugboard_pairs` (oppure `result: null`).
+
+Crack modalita `full` (ordine rotori/rings ignoti con ranking):
 
 ```bash
 python enigma_cli.py crack \
   --mode full \
   --ciphertext "XYZ..." \
   --crib "WETTERBERICHT" \
-  --rotor-pool I,II,III \
-  --search-rings \
+  --rotor-pool I,II,III,IV \
+  --ring-candidates 0,0,0 \
+  --ring-candidates 2,11,7 \
   --top-k 5 \
-  --timeout-ms 3000
+  --timeout-ms 8000 \
+  --per-config-timeout-ms 120 \
+  --heuristic-budget 1200
 ```
 
-### Benchmark
+Output: JSON con `best` e lista `ranked`.
+
+Benchmark:
 
 ```bash
-python enigma_cli.py benchmark --csv benchmark_results.csv --png benchmark_results.png
+python enigma_cli.py benchmark --csv benchmark_results.csv --png benchmark_results.png --seed 42
 ```
+
+## Demo interattiva
+
+Script pensato per demo orale end-to-end:
+
+```bash
+python interactive_demo.py
+```
+
+La demo mostra:
+
+- cifratura lettera per lettera con trace completo del segnale;
+- verifica di simmetria (stessa chiave = decifratura);
+- cracking posizioni con Z3 e tempo di risoluzione;
+- decifratura finale con chiave trovata.
+
+Configurazione demo di default in `interactive_demo.py`:
+
+- rotori `I,II,III`
+- posizioni iniziali `(5, 10, 20)`
+- rings `(0, 0, 0)`
+- riflettore `B`
+- plugboard con 10 coppie (`A-B`, `C-D`, ..., `S-T`)
 
 ## API principali
 
+Export pubblici dal package `cracker`:
+
+- `crack_simple_enigma(...)`
 - `crack_rotor_positions(...)`
 - `crack_with_plugboard(...)`
 - `rank_rotor_configurations(...)`
 - `crack_full_configuration(...)`
+- `CrackCandidate`
 
-Esempio Python rapido:
+Esempio rapido:
 
 ```python
-from cracker.full_cracker import crack_full_configuration
+from cracker import crack_full_configuration
 
 best = crack_full_configuration(
     ciphertext="...",
@@ -110,15 +170,15 @@ best = crack_full_configuration(
 print(best)
 ```
 
-## Test e quality
+## Test, quality e profiling
 
-Test completi:
+Test:
 
 ```bash
 pytest tests/ -v
 ```
 
-Suite quality locale:
+Suite locale quality:
 
 ```bash
 ./scripts/run_quality.sh
@@ -130,7 +190,7 @@ Release check locale (quality + benchmark + profiling):
 ./scripts/release.sh
 ```
 
-Profiling specifico full cracker:
+Profiling full cracker:
 
 ```bash
 python scripts/profile_full_cracker.py
@@ -140,14 +200,15 @@ Output profiling: `profiling/full_cracker_profile.txt`.
 
 ## CI
 
-Workflow GitHub Actions in `.github/workflows/ci.yml`:
-- test con coverage
+Workflow GitHub Actions: `.github/workflows/ci.yml`.
+
+- test + coverage
 - lint (`ruff`)
 - type-check (`mypy`)
 
 ## Struttura progetto
 
-```
+```text
 enigmaZ3/
 ├── enigma/
 │   ├── rotor.py
@@ -159,6 +220,7 @@ enigmaZ3/
 │   └── full_cracker.py
 ├── tests/
 │   └── test_enigma.py
+├── interactive_demo.py
 ├── enigma_cli.py
 ├── benchmark.py
 ├── scripts/
@@ -167,6 +229,5 @@ enigmaZ3/
 │   └── profile_full_cracker.py
 ├── requirements.txt
 ├── requirements-dev.txt
-├── pyproject.toml
-└── .github/workflows/ci.yml
+└── pyproject.toml
 ```
