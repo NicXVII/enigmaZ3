@@ -8,7 +8,6 @@ Main API:
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Callable
 
 from z3 import If, Int, Or, Solver, sat
 
@@ -247,7 +246,6 @@ def crack_rotor_positions(
     plugboard_pairs: list[tuple[str, str]] | None = None,
     ring_settings: tuple[int, int, int] = (0, 0, 0),
     solver_timeout_ms: int | None = 50,
-    progress_callback: Callable[[str], None] | None = None,
 ) -> tuple[int, int, int] | None:
     """
     Recover initial rotor positions (left, middle, right).
@@ -257,15 +255,10 @@ def crack_rotor_positions(
     - if Z3 times out, use deterministic exhaustive scan over 26^3 positions.
     """
 
-    def emit(message: str):
-        if progress_callback is not None:
-            progress_callback(message)
-
     ciphertext_n = _normalize_alpha(ciphertext)
     crib_n = _normalize_alpha(crib)
     n = len(crib_n)
     if n == 0 or len(ciphertext_n) < n:
-        emit("Input validation failed: empty crib or ciphertext shorter than crib.")
         return None
 
     target = ciphertext_n[:n]
@@ -277,7 +270,6 @@ def crack_rotor_positions(
 
     plug_table = _build_plug_table(plugboard_pairs)
     if plug_table is None:
-        emit("Plugboard validation failed: invalid/conflicting pairs.")
         return None
 
     crib_vals = [ord(ch) - ord("A") for ch in crib_n]
@@ -311,22 +303,15 @@ def crack_rotor_positions(
         )
         solver.add(enc == c_core)
 
-    emit("Running SMT solver...")
     check_res = solver.check()
     if check_res == sat:
         model = solver.model()
-        candidate = (
+        return (
             model[left0].as_long(),
             model[middle0].as_long(),
             model[right0].as_long(),
         )
-        emit(
-            "SAT model found: "
-            f"left0={candidate[0]}, middle0={candidate[1]}, right0={candidate[2]}"
-        )
-        return candidate
 
-    emit(f"SMT result: {check_res}. Starting deterministic backup scan.")
     for left_pos in range(26):
         for middle_pos in range(26):
             for right_pos in range(26):
@@ -343,11 +328,6 @@ def crack_rotor_positions(
                     rings,
                     notches,
                 ):
-                    emit(
-                        "Backup scan found candidate: "
-                        f"left0={left_pos}, middle0={middle_pos}, right0={right_pos}"
-                    )
                     return (left_pos, middle_pos, right_pos)
 
-    emit("No solution found.")
     return None

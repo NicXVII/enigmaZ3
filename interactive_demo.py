@@ -286,10 +286,7 @@ def main() -> int:
     print(f"              fisse      = {format_plugboard_fixed_letters(PLUGBOARD_PAIRS)}")
     print("  Cerchiamo:  posizioni  = ???")
     print()
-    print("  Traccia risoluzione Z3:")
-
-    def z3_progress(message: str):
-        print(f"    [Z3] {message}")
+    print("  Risoluzione Z3 in corso...")
 
     start = time.perf_counter()
     found_positions = crack_rotor_positions(
@@ -300,7 +297,6 @@ def main() -> int:
         plugboard_pairs=PLUGBOARD_PAIRS,
         ring_settings=RING_SETTINGS,
         solver_timeout_ms=CRACK_TIMEOUT_MS,
-        progress_callback=z3_progress,
     )
     elapsed = time.perf_counter() - start
 

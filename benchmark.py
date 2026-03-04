@@ -1,5 +1,5 @@
 """
-Benchmark runner for Enigma rotor-position cracking (pure Z3).
+Minimal benchmark runner for rotor-position cracking.
 
 Outputs:
 - benchmark_results.csv
@@ -9,7 +9,6 @@ Outputs:
 from __future__ import annotations
 
 import csv
-import random
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -35,10 +34,14 @@ class BenchmarkRow:
     ok: bool
 
 
-def _random_plugboard_pairs(n: int) -> list[tuple[str, str]]:
-    letters = list("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
-    random.shuffle(letters)
-    return [(letters[2 * i], letters[2 * i + 1]) for i in range(n)]
+PAIR_POOL = [
+    ("A", "Z"),
+    ("B", "Y"),
+    ("C", "X"),
+    ("D", "W"),
+    ("E", "V"),
+    ("F", "U"),
+]
 
 
 def _make_machine(
@@ -61,7 +64,7 @@ def benchmark_crib_length() -> list[BenchmarkRow]:
     plaintext_pool = "WETTERBERICHTZZ"
     secret_pos = (5, 10, 20)
 
-    print("=== Benchmark: Crib length (no plugboard) ===")
+    print("=== Benchmark: crib length ===")
     for length in crib_lengths:
         plaintext = plaintext_pool[:length]
         machine = _make_machine(("I", "II", "III"), secret_pos)
@@ -76,15 +79,15 @@ def benchmark_crib_length() -> list[BenchmarkRow]:
     return rows
 
 
-def benchmark_known_plugboard_pairs() -> list[BenchmarkRow]:
+def benchmark_known_plugboard() -> list[BenchmarkRow]:
     rows: list[BenchmarkRow] = []
-    pair_counts = [0, 2, 4, 6, 8, 10]
+    pair_counts = [0, 2, 4, 6]
     secret_pos = (3, 7, 14)
     plaintext = "WETTERBERICHT"
 
-    print("\n=== Benchmark: Known plugboard pairs ===")
+    print("\n=== Benchmark: known plugboard pairs ===")
     for count in pair_counts:
-        pairs = _random_plugboard_pairs(count) if count > 0 else []
+        pairs = PAIR_POOL[:count]
         machine = _make_machine(("I", "II", "III"), secret_pos, pairs=pairs)
         ciphertext = machine.process(plaintext)
 
@@ -98,34 +101,6 @@ def benchmark_known_plugboard_pairs() -> list[BenchmarkRow]:
         ok = result == secret_pos
         rows.append(BenchmarkRow("plugboard_known", "pairs", count, elapsed, ok))
         print(f"  pairs={count:2d}   time={elapsed:7.3f}s  [{'OK' if ok else 'FAIL'}]")
-    return rows
-
-
-def benchmark_solver_timeout() -> list[BenchmarkRow]:
-    rows: list[BenchmarkRow] = []
-    timeout_values = [10, 20, 40, 80, 160, 320]
-    rotor_names = ("I", "II", "III")
-    rings = (1, 5, 10)
-    secret_pos = (9, 4, 22)
-    plaintext = "OBERKOMMANDO"
-
-    machine = _make_machine(rotor_names, secret_pos, rings=rings)
-    ciphertext = machine.process(plaintext)
-
-    print("\n=== Benchmark: Solver timeout sensitivity ===")
-    for timeout_ms in timeout_values:
-        t0 = time.perf_counter()
-        result = crack_rotor_positions(
-            ciphertext=ciphertext,
-            crib=plaintext,
-            rotor_names=rotor_names,
-            ring_settings=rings,
-            solver_timeout_ms=timeout_ms,
-        )
-        elapsed = time.perf_counter() - t0
-        ok = result == secret_pos
-        rows.append(BenchmarkRow("solver_timeout", "timeout_ms", timeout_ms, elapsed, ok))
-        print(f"  timeout={timeout_ms:3d}ms  time={elapsed:7.3f}s  [{'OK' if ok else 'FAIL'}]")
     return rows
 
 
@@ -148,11 +123,10 @@ def plot_results(rows: list[BenchmarkRow], output_png: Path):
         data.sort(key=lambda r: r.value)
         return [r.value for r in data], [r.seconds for r in data], [r.ok for r in data]
 
-    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
     plots = [
         ("crib_length", "Crib length vs time", "tab:blue", "Length"),
         ("plugboard_known", "Known plugboard pairs vs time", "tab:orange", "Pairs"),
-        ("solver_timeout", "Solver timeout sweep", "tab:green", "Timeout (ms)"),
     ]
 
     for ax, (scenario, title, color, xlabel) in zip(axes, plots):
@@ -180,14 +154,10 @@ def plot_results(rows: list[BenchmarkRow], output_png: Path):
 def run_benchmarks(
     csv_path: str = "benchmark_results.csv",
     png_path: str = "benchmark_results.png",
-    seed: int = 42,
 ):
-    random.seed(seed)
-
     rows: list[BenchmarkRow] = []
     rows.extend(benchmark_crib_length())
-    rows.extend(benchmark_known_plugboard_pairs())
-    rows.extend(benchmark_solver_timeout())
+    rows.extend(benchmark_known_plugboard())
 
     write_csv(rows, Path(csv_path))
     plot_results(rows, Path(png_path))

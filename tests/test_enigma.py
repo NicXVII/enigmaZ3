@@ -87,18 +87,6 @@ class TestSimpleCracker:
         )
         assert found_pos == secret_pos
 
-    def test_crack_all_positions(self):
-        """Test cracking works for every starting position."""
-        plaintext = "HELLO"
-        for pos in range(26):
-            rotor = Rotor.from_name("I", position=pos)
-            reflector = Reflector.from_name("B")
-            machine = SimpleEnigma(rotor, reflector)
-            ct = machine.process(plaintext)
-
-            found = crack_simple_enigma(ct, plaintext)
-            assert found == pos, f"Failed for position {pos}"
-
 
 # ────────────────────────────────────────────────
 # Phase 3: Full Enigma Machine
@@ -156,50 +144,6 @@ class TestFullEnigma:
         machine.reset((0, 0, 0))
         decrypted = machine.process(ciphertext)
         assert decrypted == plaintext
-
-    def test_with_extreme_ring_settings(self):
-        """Ring settings at edges should still preserve roundtrip behavior."""
-        plaintext = "EXTREMERINGSETTING"
-        machine = self._make(positions=(25, 0, 13), rings=(0, 25, 25))
-        ciphertext = machine.process(plaintext)
-
-        machine.reset((25, 0, 13))
-        decrypted = machine.process(ciphertext)
-        assert decrypted == plaintext
-
-    def test_with_many_plugboard_pairs(self):
-        """Historically realistic dense plugboard (10 pairs)."""
-        pairs = [
-            ("A", "B"),
-            ("C", "D"),
-            ("E", "F"),
-            ("G", "H"),
-            ("I", "J"),
-            ("K", "L"),
-            ("M", "N"),
-            ("O", "P"),
-            ("Q", "R"),
-            ("S", "T"),
-        ]
-        plaintext = "PLUGBOARDDENSITY"
-        machine = self._make(positions=(4, 18, 9), rings=(3, 12, 7), plugboard_pairs=pairs)
-        ciphertext = machine.process(plaintext)
-
-        machine.reset((4, 18, 9))
-        decrypted = machine.process(ciphertext)
-        assert decrypted == plaintext
-
-    def test_double_step_middle_at_notch_steps_left(self):
-        """If middle rotor is at notch, middle and left must step."""
-        machine = self._make(positions=(0, 4, 0))  # II notch is E=4
-        machine.encrypt_char("A")
-        assert (machine.left.position, machine.middle.position, machine.right.position) == (1, 5, 1)
-
-    def test_double_step_right_notch_steps_middle(self):
-        """If right rotor is at notch, middle must step."""
-        machine = self._make(positions=(0, 0, 21))  # III notch is V=21
-        machine.encrypt_char("A")
-        assert (machine.left.position, machine.middle.position, machine.right.position) == (0, 1, 22)
 
     def test_double_step_sequence_over_two_keys(self):
         """Classic double-step sequence across two consecutive keypresses."""

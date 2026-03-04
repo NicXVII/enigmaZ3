@@ -113,7 +113,7 @@ def _cmd_crack(args: argparse.Namespace) -> int:
 
 
 def _cmd_benchmark(args: argparse.Namespace) -> int:
-    run_benchmarks(csv_path=args.csv, png_path=args.png, seed=args.seed)
+    run_benchmarks(csv_path=args.csv, png_path=args.png)
     return 0
 
 
@@ -156,7 +156,6 @@ def _build_parser() -> argparse.ArgumentParser:
     p_benchmark = sub.add_parser("benchmark", help="run benchmark suite")
     p_benchmark.add_argument("--csv", default="benchmark_results.csv")
     p_benchmark.add_argument("--png", default="benchmark_results.png")
-    p_benchmark.add_argument("--seed", type=int, default=42)
     p_benchmark.set_defaults(func=_cmd_benchmark)
 
     return parser
