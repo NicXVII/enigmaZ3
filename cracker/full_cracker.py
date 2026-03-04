@@ -1,8 +1,9 @@
 """
-Pure Z3 cracker for full Enigma (3 rotors + optional known plugboard).
+Rotor-position cracker for full Enigma.
 
-Main API:
-- crack_rotor_positions: recover initial rotor positions from ciphertext + crib.
+Strategy:
+- first try SMT constraints with Z3;
+- if Z3 times out/returns unknown, run deterministic backup scan on 26^3 starts.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ from functools import lru_cache
 
 from z3 import If, Int, Or, Solver, sat
 
+from enigma import EnigmaMachine, Plugboard, Reflector, Rotor
 from enigma.reflector import REFLECTOR_WIRINGS
 from enigma.rotor import ROTOR_NOTCHES, ROTOR_WIRINGS
 
@@ -39,7 +41,6 @@ def _reflector(name: str) -> tuple[int, ...]:
 
 
 def _z3_lookup(table: tuple[int, ...], idx_expr):
-    """Build table[idx_expr] with a Z3 If-Then-Else chain."""
     expr = table[25]
     for i in range(24, -1, -1):
         expr = If(idx_expr == i, table[i], expr)
@@ -47,17 +48,10 @@ def _z3_lookup(table: tuple[int, ...], idx_expr):
 
 
 def _z3_wrap26(expr):
-    """
-    Wrap an integer expression into [0, 25] without using modulo.
-
-    This encoding is solver-friendlier than `% 26` because all intermediate
-    Enigma expressions are guaranteed to be in [-25, 50].
-    """
     return If(expr < 0, expr + 26, If(expr >= 26, expr - 26, expr))
 
 
 def _compute_positions(left0, middle0, right0, n: int, notches: tuple[int, int, int]):
-    """Compute symbolic rotor positions after stepping for each character."""
     pos_left = []
     pos_middle = []
     pos_right = []
@@ -85,7 +79,7 @@ def _compute_positions(left0, middle0, right0, n: int, notches: tuple[int, int, 
 
 
 def _encrypt_char_z3(
-    p_val: int,
+    plain_val: int,
     pos_left,
     pos_middle,
     pos_right,
@@ -94,8 +88,7 @@ def _encrypt_char_z3(
     reflector: tuple[int, ...],
     rings: tuple[int, int, int],
 ):
-    """Z3 expression for one Enigma core encryption (no plugboard)."""
-    x = p_val
+    x = plain_val
 
     idx_r = _z3_wrap26(x + pos_right - rings[2])
     x = _z3_wrap26(_z3_lookup(r_fwd[2], idx_r) - pos_right + rings[2])
@@ -120,106 +113,6 @@ def _encrypt_char_z3(
     return x
 
 
-def _compute_positions_numeric(
-    left0: int,
-    middle0: int,
-    right0: int,
-    n: int,
-    notches: tuple[int, int, int],
-) -> tuple[list[int], list[int], list[int]]:
-    pos_left: list[int] = []
-    pos_middle: list[int] = []
-    pos_right: list[int] = []
-
-    for i in range(n):
-        if i == 0:
-            prev_left, prev_middle, prev_right = left0, middle0, right0
-        else:
-            prev_left, prev_middle, prev_right = (
-                pos_left[i - 1],
-                pos_middle[i - 1],
-                pos_right[i - 1],
-            )
-
-        middle_at_notch = prev_middle == notches[1]
-        right_at_notch = prev_right == notches[2]
-        middle_steps = right_at_notch or middle_at_notch
-        left_steps = middle_at_notch
-
-        pos_right.append((prev_right + 1) % 26)
-        pos_middle.append((prev_middle + 1) % 26 if middle_steps else prev_middle)
-        pos_left.append((prev_left + 1) % 26 if left_steps else prev_left)
-
-    return pos_left, pos_middle, pos_right
-
-
-def _encrypt_core_numeric(
-    letter_val: int,
-    pos_left: int,
-    pos_middle: int,
-    pos_right: int,
-    r_fwd: tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...]],
-    r_inv: tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...]],
-    reflector: tuple[int, ...],
-    rings: tuple[int, int, int],
-) -> int:
-    idx_r = (letter_val + pos_right - rings[2]) % 26
-    x = (r_fwd[2][idx_r] - pos_right + rings[2]) % 26
-
-    idx_m = (x + pos_middle - rings[1]) % 26
-    x = (r_fwd[1][idx_m] - pos_middle + rings[1]) % 26
-
-    idx_l = (x + pos_left - rings[0]) % 26
-    x = (r_fwd[0][idx_l] - pos_left + rings[0]) % 26
-
-    x = reflector[x]
-
-    idx_l_b = (x + pos_left - rings[0]) % 26
-    x = (r_inv[0][idx_l_b] - pos_left + rings[0]) % 26
-
-    idx_m_b = (x + pos_middle - rings[1]) % 26
-    x = (r_inv[1][idx_m_b] - pos_middle + rings[1]) % 26
-
-    idx_r_b = (x + pos_right - rings[2]) % 26
-    x = (r_inv[2][idx_r_b] - pos_right + rings[2]) % 26
-    return x
-
-
-def _matches_candidate_numeric(
-    left0: int,
-    middle0: int,
-    right0: int,
-    crib_vals: list[int],
-    target_vals: list[int],
-    plug_table: list[int],
-    r_fwd: tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...]],
-    r_inv: tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...]],
-    reflector: tuple[int, ...],
-    rings: tuple[int, int, int],
-    notches: tuple[int, int, int],
-) -> bool:
-    n = len(crib_vals)
-    pos_left, pos_middle, pos_right = _compute_positions_numeric(
-        left0, middle0, right0, n, notches
-    )
-    for i in range(n):
-        p_core = plug_table[crib_vals[i]]
-        c_core = plug_table[target_vals[i]]
-        out = _encrypt_core_numeric(
-            p_core,
-            pos_left[i],
-            pos_middle[i],
-            pos_right[i],
-            r_fwd,
-            r_inv,
-            reflector,
-            rings,
-        )
-        if out != c_core:
-            return False
-    return True
-
-
 def _build_plug_table(plugboard_pairs: list[tuple[str, str]] | None) -> list[int] | None:
     plug_table = list(range(26))
     if not plugboard_pairs:
@@ -232,10 +125,55 @@ def _build_plug_table(plugboard_pairs: list[tuple[str, str]] | None) -> list[int
             return None
         if ia != ib and (plug_table[ia] != ia or plug_table[ib] != ib):
             return None
-
         plug_table[ia] = ib
         plug_table[ib] = ia
     return plug_table
+
+
+def _matches_candidate_with_machine(
+    rotor_names: tuple[str, str, str],
+    reflector_name: str,
+    ring_settings: tuple[int, int, int],
+    plugboard_pairs: list[tuple[str, str]] | None,
+    candidate_positions: tuple[int, int, int],
+    crib: str,
+    target_cipher: str,
+) -> bool:
+    machine = EnigmaMachine(
+        [
+            Rotor.from_name(rotor_names[0], ring=ring_settings[0], position=candidate_positions[0]),
+            Rotor.from_name(rotor_names[1], ring=ring_settings[1], position=candidate_positions[1]),
+            Rotor.from_name(rotor_names[2], ring=ring_settings[2], position=candidate_positions[2]),
+        ],
+        Reflector.from_name(reflector_name),
+        Plugboard(plugboard_pairs),
+    )
+    return machine.process(crib) == target_cipher
+
+
+def _fallback_scan_positions(
+    rotor_names: tuple[str, str, str],
+    reflector_name: str,
+    ring_settings: tuple[int, int, int],
+    plugboard_pairs: list[tuple[str, str]] | None,
+    crib: str,
+    target_cipher: str,
+) -> tuple[int, int, int] | None:
+    for left_pos in range(26):
+        for middle_pos in range(26):
+            for right_pos in range(26):
+                candidate = (left_pos, middle_pos, right_pos)
+                if _matches_candidate_with_machine(
+                    rotor_names,
+                    reflector_name,
+                    ring_settings,
+                    plugboard_pairs,
+                    candidate,
+                    crib,
+                    target_cipher,
+                ):
+                    return candidate
+    return None
 
 
 def crack_rotor_positions(
@@ -247,14 +185,6 @@ def crack_rotor_positions(
     ring_settings: tuple[int, int, int] = (0, 0, 0),
     solver_timeout_ms: int | None = 50,
 ) -> tuple[int, int, int] | None:
-    """
-    Recover initial rotor positions (left, middle, right).
-
-    Strategy:
-    - first attempt SMT solving with Z3;
-    - if Z3 times out, use deterministic exhaustive scan over 26^3 positions.
-    """
-
     ciphertext_n = _normalize_alpha(ciphertext)
     crib_n = _normalize_alpha(crib)
     n = len(crib_n)
@@ -303,8 +233,7 @@ def crack_rotor_positions(
         )
         solver.add(enc == c_core)
 
-    check_res = solver.check()
-    if check_res == sat:
+    if solver.check() == sat:
         model = solver.model()
         return (
             model[left0].as_long(),
@@ -312,22 +241,11 @@ def crack_rotor_positions(
             model[right0].as_long(),
         )
 
-    for left_pos in range(26):
-        for middle_pos in range(26):
-            for right_pos in range(26):
-                if _matches_candidate_numeric(
-                    left_pos,
-                    middle_pos,
-                    right_pos,
-                    crib_vals,
-                    target_vals,
-                    plug_table,
-                    r_fwd,
-                    r_inv,
-                    reflector,
-                    rings,
-                    notches,
-                ):
-                    return (left_pos, middle_pos, right_pos)
-
-    return None
+    return _fallback_scan_positions(
+        rotor_names=rotor_names,
+        reflector_name=reflector_name,
+        ring_settings=rings,
+        plugboard_pairs=plugboard_pairs,
+        crib=crib_n,
+        target_cipher=target,
+    )

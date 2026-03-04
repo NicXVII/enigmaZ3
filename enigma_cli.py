@@ -93,10 +93,6 @@ def _cmd_encrypt_like(args: argparse.Namespace) -> int:
 
 def _cmd_crack(args: argparse.Namespace) -> int:
     pairs = _parse_pairs(args.plugboard)
-
-    if args.mode != "positions":
-        raise ValueError("only crack mode 'positions' is available")
-
     rotors = _parse_rotors(args.rotors)
     rings = _parse_triplet(args.rings, "rings")
     result = crack_rotor_positions(
@@ -143,7 +139,6 @@ def _build_parser() -> argparse.ArgumentParser:
     p_decrypt.set_defaults(func=_cmd_encrypt_like)
 
     p_crack = sub.add_parser("crack", help="crack ciphertext")
-    p_crack.add_argument("--mode", choices=["positions"], default="positions")
     p_crack.add_argument("--ciphertext", required=True)
     p_crack.add_argument("--crib", required=True)
     p_crack.add_argument("--reflector", default="B")

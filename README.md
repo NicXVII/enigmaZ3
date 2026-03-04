@@ -70,7 +70,6 @@ Crack posizioni con Z3:
 
 ```bash
 python enigma_cli.py crack \
-  --mode positions \
   --ciphertext "XYZ..." \
   --crib "WETTERBERICHT" \
   --rotors I,II,III \
