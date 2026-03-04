@@ -11,12 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from cracker.full_cracker import (
-    crack_full_configuration,
-    crack_rotor_positions,
-    crack_with_plugboard,
-    rank_rotor_configurations,
-)
+from cracker.full_cracker import crack_rotor_positions
 from cracker.simple_cracker import crack_simple_enigma
 from enigma.machine import EnigmaMachine, SimpleEnigma
 from enigma.plugboard import Plugboard
@@ -283,100 +278,3 @@ class TestFullCracker:
             plugboard_pairs=pairs,
         )
         assert found == secret_positions
-
-    def test_crack_with_unknown_plugboard_end_to_end(self):
-        """Unknown plugboard cracking should return a decryptable configuration."""
-        secret_positions = (6, 13, 19)
-        secret_pairs = [("A", "Z"), ("B", "Y"), ("C", "X")]
-
-        machine = EnigmaMachine(
-            [
-                Rotor.from_name("I", position=secret_positions[0]),
-                Rotor.from_name("II", position=secret_positions[1]),
-                Rotor.from_name("III", position=secret_positions[2]),
-            ],
-            Reflector.from_name("B"),
-            Plugboard(secret_pairs),
-        )
-
-        plaintext = "WETTERBERICHT"
-        ciphertext = machine.process(plaintext)
-
-        cracked = crack_with_plugboard(
-            ciphertext=ciphertext,
-            crib=plaintext,
-            rotor_names=("I", "II", "III"),
-            reflector_name="B",
-            num_plugboard_pairs=3,
-            solver_timeout_ms=8000,
-        )
-        assert cracked is not None
-
-        found_positions, found_pairs = cracked
-        assert found_positions == secret_positions
-
-        verify_machine = EnigmaMachine(
-            [
-                Rotor.from_name("I", position=found_positions[0]),
-                Rotor.from_name("II", position=found_positions[1]),
-                Rotor.from_name("III", position=found_positions[2]),
-            ],
-            Reflector.from_name("B"),
-            Plugboard(found_pairs),
-        )
-        assert verify_machine.process(plaintext) == ciphertext
-
-    def test_crack_full_configuration_unknown_order_and_rings(self):
-        """Complete search should recover order + rings + positions with ranking enabled."""
-        secret_order = ("III", "I", "II")
-        secret_positions = (9, 4, 22)
-        secret_rings = (2, 11, 7)
-
-        machine = EnigmaMachine(
-            [
-                Rotor.from_name(secret_order[0], ring=secret_rings[0], position=secret_positions[0]),
-                Rotor.from_name(secret_order[1], ring=secret_rings[1], position=secret_positions[1]),
-                Rotor.from_name(secret_order[2], ring=secret_rings[2], position=secret_positions[2]),
-            ],
-            Reflector.from_name("B"),
-        )
-
-        plaintext = "OBERKOMMANDO"
-        ciphertext = machine.process(plaintext)
-
-        ranked = rank_rotor_configurations(
-            ciphertext=ciphertext,
-            crib=plaintext,
-            rotor_pool=("I", "II", "III"),
-            reflector_name="B",
-            search_rotor_order=True,
-            search_ring_settings=False,
-            ring_candidates=[(0, 0, 0), (2, 11, 7), (1, 1, 1)],
-            top_k=5,
-            global_timeout_ms=8000,
-            solver_timeout_ms_per_config=120,
-            heuristic_position_budget=1200,
-        )
-
-        assert ranked
-        assert ranked[0].mismatches <= ranked[-1].mismatches
-
-        best = crack_full_configuration(
-            ciphertext=ciphertext,
-            crib=plaintext,
-            rotor_pool=("I", "II", "III"),
-            reflector_name="B",
-            search_rotor_order=True,
-            search_ring_settings=False,
-            ring_candidates=[(0, 0, 0), (2, 11, 7), (1, 1, 1)],
-            top_k=5,
-            global_timeout_ms=8000,
-            solver_timeout_ms_per_config=120,
-            heuristic_position_budget=1200,
-        )
-
-        assert best is not None
-        assert best.mismatches == 0
-        assert best.rotor_names == secret_order
-        assert best.ring_settings == secret_rings
-        assert best.positions == secret_positions

@@ -1,5 +1,5 @@
 """
-Benchmark runner for Enigma crackers.
+Benchmark runner for Enigma rotor-position cracking (pure Z3).
 
 Outputs:
 - benchmark_results.csv
@@ -19,11 +19,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from cracker.full_cracker import (
-    crack_full_configuration,
-    crack_rotor_positions,
-    crack_with_plugboard,
-)
+from cracker.full_cracker import crack_rotor_positions
 from enigma.machine import EnigmaMachine
 from enigma.plugboard import Plugboard
 from enigma.reflector import Reflector
@@ -56,9 +52,7 @@ def _make_machine(
         Rotor.from_name(rotor_names[1], ring=rings[1], position=positions[1]),
         Rotor.from_name(rotor_names[2], ring=rings[2], position=positions[2]),
     ]
-    reflector = Reflector.from_name("B")
-    plugboard = Plugboard(pairs)
-    return EnigmaMachine(rotors, reflector, plugboard)
+    return EnigmaMachine(rotors, Reflector.from_name("B"), Plugboard(pairs))
 
 
 def benchmark_crib_length() -> list[BenchmarkRow]:
@@ -67,7 +61,7 @@ def benchmark_crib_length() -> list[BenchmarkRow]:
     plaintext_pool = "WETTERBERICHTZZ"
     secret_pos = (5, 10, 20)
 
-    print("=== Benchmark: Crib length (known configuration, no plugboard) ===")
+    print("=== Benchmark: Crib length (no plugboard) ===")
     for length in crib_lengths:
         plaintext = plaintext_pool[:length]
         machine = _make_machine(("I", "II", "III"), secret_pos)
@@ -77,121 +71,72 @@ def benchmark_crib_length() -> list[BenchmarkRow]:
         result = crack_rotor_positions(ciphertext=ciphertext, crib=plaintext)
         elapsed = time.perf_counter() - t0
         ok = result == secret_pos
-        rows.append(
-            BenchmarkRow(
-                scenario="crib_length",
-                parameter="length",
-                value=length,
-                seconds=elapsed,
-                ok=ok,
-            )
-        )
+        rows.append(BenchmarkRow("crib_length", "length", length, elapsed, ok))
         print(f"  length={length:2d}  time={elapsed:7.3f}s  [{'OK' if ok else 'FAIL'}]")
     return rows
 
 
-def benchmark_plugboard_pairs() -> list[BenchmarkRow]:
+def benchmark_known_plugboard_pairs() -> list[BenchmarkRow]:
     rows: list[BenchmarkRow] = []
-    pair_counts = [0, 1, 2, 3]
+    pair_counts = [0, 2, 4, 6, 8, 10]
     secret_pos = (3, 7, 14)
     plaintext = "WETTERBERICHT"
 
-    print("\n=== Benchmark: Unknown plugboard pairs ===")
+    print("\n=== Benchmark: Known plugboard pairs ===")
     for count in pair_counts:
         pairs = _random_plugboard_pairs(count) if count > 0 else []
         machine = _make_machine(("I", "II", "III"), secret_pos, pairs=pairs)
         ciphertext = machine.process(plaintext)
 
         t0 = time.perf_counter()
-        if count == 0:
-            result = crack_rotor_positions(ciphertext=ciphertext, crib=plaintext)
-            ok = result == secret_pos
-        else:
-            cracked = crack_with_plugboard(
-                ciphertext=ciphertext,
-                crib=plaintext,
-                num_plugboard_pairs=count,
-            )
-            ok = cracked is not None and cracked[0] == secret_pos
-        elapsed = time.perf_counter() - t0
-
-        rows.append(
-            BenchmarkRow(
-                scenario="plugboard_unknown",
-                parameter="pairs",
-                value=count,
-                seconds=elapsed,
-                ok=ok,
-            )
+        result = crack_rotor_positions(
+            ciphertext=ciphertext,
+            crib=plaintext,
+            plugboard_pairs=pairs if pairs else None,
         )
+        elapsed = time.perf_counter() - t0
+        ok = result == secret_pos
+        rows.append(BenchmarkRow("plugboard_known", "pairs", count, elapsed, ok))
         print(f"  pairs={count:2d}   time={elapsed:7.3f}s  [{'OK' if ok else 'FAIL'}]")
     return rows
 
 
-def benchmark_unknown_order_and_rings() -> list[BenchmarkRow]:
+def benchmark_solver_timeout() -> list[BenchmarkRow]:
     rows: list[BenchmarkRow] = []
-    crib_lengths = [6, 8, 10]
-    rotor_order = ("III", "I", "II")
-    positions = (9, 4, 22)
-    rings = (2, 11, 7)
-    plaintext_pool = "OBERKOMMANDOTESTWETTER"
+    timeout_values = [10, 20, 40, 80, 160, 320]
+    rotor_names = ("I", "II", "III")
+    rings = (1, 5, 10)
+    secret_pos = (9, 4, 22)
+    plaintext = "OBERKOMMANDO"
 
-    ring_candidates = [(0, 0, 0), (2, 11, 7), (1, 1, 1), (7, 7, 7)]
-    print("\n=== Benchmark: Unknown rotor order + ring-candidate ranking ===")
-    for length in crib_lengths:
-        plaintext = plaintext_pool[:length]
-        machine = _make_machine(rotor_order, positions, rings=rings)
-        ciphertext = machine.process(plaintext)
+    machine = _make_machine(rotor_names, secret_pos, rings=rings)
+    ciphertext = machine.process(plaintext)
 
+    print("\n=== Benchmark: Solver timeout sensitivity ===")
+    for timeout_ms in timeout_values:
         t0 = time.perf_counter()
-        result = crack_full_configuration(
+        result = crack_rotor_positions(
             ciphertext=ciphertext,
             crib=plaintext,
-            rotor_pool=("I", "II", "III"),
-            search_rotor_order=True,
-            search_ring_settings=False,
-            ring_candidates=ring_candidates,
-            top_k=3,
-            global_timeout_ms=9000,
-            solver_timeout_ms_per_config=70,
-            heuristic_position_budget=500,
+            rotor_names=rotor_names,
+            ring_settings=rings,
+            solver_timeout_ms=timeout_ms,
         )
         elapsed = time.perf_counter() - t0
-        ok = (
-            result is not None
-            and result.mismatches == 0
-            and result.rotor_names == rotor_order
-            and result.ring_settings == rings
-            and result.positions == positions
-        )
-
-        rows.append(
-            BenchmarkRow(
-                scenario="order_rings_unknown",
-                parameter="length",
-                value=length,
-                seconds=elapsed,
-                ok=ok,
-            )
-        )
-        print(f"  length={length:2d}  time={elapsed:7.3f}s  [{'OK' if ok else 'FAIL'}]")
+        ok = result == secret_pos
+        rows.append(BenchmarkRow("solver_timeout", "timeout_ms", timeout_ms, elapsed, ok))
+        print(f"  timeout={timeout_ms:3d}ms  time={elapsed:7.3f}s  [{'OK' if ok else 'FAIL'}]")
     return rows
 
 
 def write_csv(rows: list[BenchmarkRow], csv_path: Path):
     csv_path.parent.mkdir(parents=True, exist_ok=True)
-    with csv_path.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
+    with csv_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
         writer.writerow(["scenario", "parameter", "value", "seconds", "ok"])
         for row in rows:
             writer.writerow(
-                [
-                    row.scenario,
-                    row.parameter,
-                    row.value,
-                    f"{row.seconds:.6f}",
-                    int(row.ok),
-                ]
+                [row.scenario, row.parameter, row.value, f"{row.seconds:.6f}", int(row.ok)]
             )
 
 
@@ -204,21 +149,26 @@ def plot_results(rows: list[BenchmarkRow], output_png: Path):
         return [r.value for r in data], [r.seconds for r in data], [r.ok for r in data]
 
     fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+    plots = [
+        ("crib_length", "Crib length vs time", "tab:blue", "Length"),
+        ("plugboard_known", "Known plugboard pairs vs time", "tab:orange", "Pairs"),
+        ("solver_timeout", "Solver timeout sweep", "tab:green", "Timeout (ms)"),
+    ]
 
-    for ax, (scenario, title, color) in zip(
-        axes,
-        [
-            ("crib_length", "Known setup vs crib length", "tab:blue"),
-            ("plugboard_unknown", "Unknown plugboard pairs", "tab:red"),
-            ("order_rings_unknown", "Unknown order and rings", "tab:green"),
-        ],
-    ):
+    for ax, (scenario, title, color, xlabel) in zip(axes, plots):
         xs, ys, oks = _series(scenario)
         ax.plot(xs, ys, marker="o", linewidth=2, color=color)
         for x, y, ok in zip(xs, ys, oks):
-            ax.annotate("OK" if ok else "FAIL", (x, y), textcoords="offset points", xytext=(0, 6), ha="center", fontsize=8)
+            ax.annotate(
+                "OK" if ok else "FAIL",
+                (x, y),
+                textcoords="offset points",
+                xytext=(0, 6),
+                ha="center",
+                fontsize=8,
+            )
         ax.set_title(title)
-        ax.set_xlabel("Parameter")
+        ax.set_xlabel(xlabel)
         ax.set_ylabel("Seconds")
         ax.grid(True, alpha=0.3)
 
@@ -236,8 +186,8 @@ def run_benchmarks(
 
     rows: list[BenchmarkRow] = []
     rows.extend(benchmark_crib_length())
-    rows.extend(benchmark_plugboard_pairs())
-    rows.extend(benchmark_unknown_order_and_rings())
+    rows.extend(benchmark_known_plugboard_pairs())
+    rows.extend(benchmark_solver_timeout())
 
     write_csv(rows, Path(csv_path))
     plot_results(rows, Path(png_path))
