@@ -217,6 +217,7 @@ async function runCrack() {
     rings: [cfg.ringLeft, cfg.ringMid, cfg.ringRight],
     reflector: cfg.reflector,
     plugboard: cfg.plugboard,
+    num_plugboard_pairs: Number(document.getElementById("num-plug-pairs")?.value) || 3,
   };
 
   try {
@@ -236,6 +237,9 @@ async function runCrack() {
 
     if (result.status === "sat" && result.rotors) {
       applyRecoveredToForm(result);
+    }
+    if (result.error) {
+      appendSolverLog(solverLog, `[server] ${result.error}`);
     }
   } catch (e) {
     console.error(e);

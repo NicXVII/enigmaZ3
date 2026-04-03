@@ -43,6 +43,8 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="styles.css" />
+    <!-- Opzionale: altra URL API (default in api.js → http://127.0.0.1:8765) -->
+    <!-- <script>window.ENIGMA_API_BASE = "http://127.0.0.1:9000";</script> -->
   </head>
   <body class="min-h-screen bg-lab-bg text-slate-200 font-sans antialiased selection:bg-cyan-500/30">
     <!-- Ambient grid (Aceternity-style background) -->
@@ -195,6 +197,20 @@
             </select>
           </div>
 
+          <div>
+            <label class="mb-1 block text-xs text-slate-500" for="num-plug-pairs">
+              Plugboard pairs count (only for “Plugboard search” mode)
+            </label>
+            <input
+              id="num-plug-pairs"
+              type="number"
+              min="0"
+              max="13"
+              value="3"
+              class="input-field font-mono text-sm"
+            />
+          </div>
+
           <div class="flex flex-wrap gap-2 pt-1">
             <button type="button" id="btn-simulate" class="btn-primary">Simulate</button>
             <button type="button" id="btn-crack" class="btn-accent">Crack</button>
@@ -203,7 +219,9 @@
           </div>
           <p id="control-hint" class="text-[11px] leading-relaxed text-slate-600">
             Simulate runs the machine forward and fills ciphertext. Step advances one letter with
-            animation. Crack calls the solver API (or demo mode).
+            animation. Crack usa il server Python (<code class="text-slate-500">python enigma_http_server.py</code>,
+            default <code class="text-slate-500">127.0.0.1:8765</code>). Mock solo con
+            <code class="text-slate-500">ENIGMA_USE_MOCK_CRACK</code> + <code class="text-slate-500">ENIGMA_API_BASE = &quot;&quot;</code>.
           </p>
         </section>
 

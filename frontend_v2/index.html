@@ -24,6 +24,7 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="styles.css" />
+    <!-- Opzionale: altra URL (default api.js → http://127.0.0.1:8765) -->
   </head>
   <body class="bg-slate-50 text-slate-900 antialiased">
     <div class="mx-auto max-w-3xl px-4 py-8 sm:px-6 lg:max-w-4xl lg:py-10">
@@ -214,11 +215,25 @@
             <div>
               <h2 class="text-xl font-semibold text-slate-900">Ricostruire la chiave con Z3 (demo)</h2>
               <p class="mt-1 text-sm text-slate-600">
-                Se conosci un pezzo di messaggio in chiaro (<strong>crib</strong>) e il testo cifrato corrispondente, il
-                solutore cerca un’assegnazione coerente. Senza server Python, qui vedi una <strong>simulazione</strong> del
-                processo e un risultato di esempio.
+                Avvia <code class="rounded bg-white/80 px-1">python enigma_http_server.py</code> (porta predefinita 8765).
+                Il frontend la usa automaticamente; il cracker Z3 è quello in <code class="rounded bg-white/80 px-1">cracker/</code>.
               </p>
             </div>
+          </div>
+
+          <div class="mt-4 grid gap-4 sm:grid-cols-2">
+            <label class="block">
+              <span class="mb-1 block text-sm font-medium text-slate-800">Modalità ricerca</span>
+              <select id="crack-mode" class="input-v2 w-full font-mono text-sm">
+                <option value="positions">Solo posizioni iniziali (plugboard noto o vuoto)</option>
+                <option value="plugboard">Plugboard ignoto (rotori e anelli noti)</option>
+                <option value="full">Configurazione ampia (ordine rotori, pool I–V)</option>
+              </select>
+            </label>
+            <label class="block">
+              <span class="mb-1 block text-sm font-medium text-slate-800">N. coppie plug (solo modalità plugboard)</span>
+              <input id="num-plug-pairs" type="number" min="0" max="13" value="3" class="input-v2 w-full font-mono" />
+            </label>
           </div>
 
           <label class="mt-4 block">
@@ -233,7 +248,7 @@
             <p id="z3-status" class="mt-2 text-sm text-slate-600">In attesa.</p>
           </div>
 
-          <button type="button" id="btn-crack" class="btn-v2-accent mt-4 w-full sm:w-auto">Avvia ricerca (demo)</button>
+          <button type="button" id="btn-crack" class="btn-v2-accent mt-4 w-full sm:w-auto">Avvia ricerca Z3</button>
 
           <div id="z3-result" class="mt-4 hidden rounded-lg border border-emerald-200 bg-white p-4 text-sm text-slate-800"></div>
         </li>

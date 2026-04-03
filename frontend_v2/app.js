@@ -249,44 +249,61 @@ async function onCrack() {
   }, 100);
 
   const cfg = readConfig();
+  const mode = document.getElementById("crack-mode")?.value || "positions";
   const payload = {
     crib,
     ciphertext,
-    mode: "positions",
+    mode,
     guess_rotors: [cfg.rotorLeft, cfg.rotorMid, cfg.rotorRight],
     rotors: [cfg.rotorLeft, cfg.rotorMid, cfg.rotorRight],
     positions: [cfg.posLeft, cfg.posMid, cfg.posRight],
     rings: [cfg.ringLeft, cfg.ringMid, cfg.ringRight],
     reflector: cfg.reflector,
     plugboard: cfg.plugboard,
+    num_plugboard_pairs: Number(document.getElementById("num-plug-pairs")?.value) || 3,
   };
 
   try {
     const res = await postCrack(payload);
     setZ3Bar(100);
     if (status) {
-      status.textContent =
-        res.status === "sat"
-          ? "Trovata un’assegnazione coerente (demo o server)."
-          : `Esito solver: ${res.status}`;
+      if (res.status === "sat") {
+        status.textContent = "Trovata un’assegnazione coerente.";
+      } else if (res.status === "unsat") {
+        status.textContent = "Nessuna chiave compatibile trovata (nel tempo limite o vincoli impossibili).";
+      } else {
+        status.textContent = `Esito: ${res.status}`;
+      }
     }
-    if (resultEl && res.status === "sat") {
+    if (resultEl) {
       resultEl.classList.remove("hidden");
-      const plug = (res.plugboard || []).map((p) => `${p[0]}↔${p[1]}`).join(", ") || "—";
-      resultEl.innerHTML = `
-        <p class="font-semibold text-emerald-900">Risultato (esempio se in modalità demo)</p>
+      if (res.status === "sat") {
+        const plug = (res.plugboard || []).map((p) => `${p[0]}↔${p[1]}`).join(", ") || "—";
+        const method = res.method ? `<li><strong>Metodo:</strong> ${res.method}</li>` : "";
+        resultEl.innerHTML = `
+        <p class="font-semibold text-emerald-900">Risultato</p>
         <ul class="mt-2 list-inside list-disc space-y-1 text-slate-700">
           <li><strong>Rotori:</strong> ${(res.rotors || []).join(" · ")}</li>
           <li><strong>Posizioni:</strong> ${(res.positions || []).join(", ")}</li>
           <li><strong>Anelli:</strong> ${(res.rings || []).join(", ")}</li>
           <li><strong>Spine:</strong> ${plug}</li>
+          ${method}
         </ul>
-        <p class="mt-2 text-xs text-slate-500">Con backend reale (<code>ENIGMA_API_BASE</code>) qui compariranno i valori calcolati da Z3.</p>
-      `;
+        `;
+      } else {
+        resultEl.innerHTML = `
+        <p class="font-semibold text-amber-900">Nessuna soluzione</p>
+        <p class="mt-1 text-slate-700">${res.error || "Prova un crib più lungo, controlla che ciphertext e crib coincidano, o aumenta i timeout sul server."}</p>
+        `;
+      }
     }
   } catch (e) {
     setZ3Bar(0);
     if (status) status.textContent = `Errore: ${e.message || e}`;
+    if (resultEl) {
+      resultEl.classList.remove("hidden");
+      resultEl.innerHTML = `<p class="text-red-800">Impossibile contattare l’API su <code class="rounded bg-slate-100 px-1">http://127.0.0.1:8765</code>. Avvia dalla root del progetto: <code class="rounded bg-slate-100 px-1">python enigma_http_server.py</code> (con venv e <code>z3-solver</code> installato).</p>`;
+    }
   } finally {
     if (progressTimer) window.clearInterval(progressTimer);
     if (btn) btn.disabled = false;

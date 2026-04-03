@@ -34,6 +34,18 @@ Setup sviluppo (test, coverage, lint, type-check):
 pip install -r requirements-dev.txt
 ```
 
+## API HTTP per i frontend (`frontend/`, `frontend_v2/`)
+
+Dopo `pip install -r requirements.txt`, dalla root del repo:
+
+```bash
+python enigma_http_server.py
+```
+
+Serve `POST /encrypt` e `POST /crack` su `http://127.0.0.1:8765` (porta opzionale: `python enigma_http_server.py 9000`). I frontend usano questa URL **di default** (`frontend/api.js`); avvia il server e apri la pagina statica.
+
+Dettagli request/response: `frontend/BACKEND.md`.
+
 ## Uso CLI
 
 Help generale:
