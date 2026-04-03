@@ -73,7 +73,7 @@ class Rotor:
         Advance the rotor by one position.
         Returns True if the rotor was at its notch (i.e. the next rotor should step).
         """
-        at_notch = self.position == self.notch
+        at_notch = self.is_at_notch()
         self.position = (self.position + 1) % 26
         return at_notch
 
