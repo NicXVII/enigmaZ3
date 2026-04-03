@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="it">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>EnigmaZ3 — Demo semplice</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ["Source Sans 3", "system-ui", "sans-serif"],
+              mono: ["IBM Plex Mono", "ui-monospace", "monospace"],
+            },
+          },
+        },
+      };
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Source+Sans+3:ital,wght@0,400;0,600;0,700;1,400&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="bg-slate-50 text-slate-900 antialiased">
+    <div class="mx-auto max-w-3xl px-4 py-8 sm:px-6 lg:max-w-4xl lg:py-10">
+      <!-- Intestazione -->
+      <header class="mb-10 text-center">
+        <p class="text-sm font-semibold uppercase tracking-widest text-slate-500">Progetto universitario</p>
+        <h1 class="mt-2 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">EnigmaZ3</h1>
+        <p class="mx-auto mt-3 max-w-xl text-lg text-slate-600">
+          Simula la macchina Enigma e, in modalità demo, mostra come Z3 può ricostruire la chiave a partire
+          da un testo noto (<em>crib</em>) e dal messaggio cifrato.
+        </p>
+      </header>
+
+      <!-- Flusso numerato -->
+      <ol class="space-y-8">
+        <!-- 1. Chiave -->
+        <li class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div class="flex items-baseline gap-3">
+            <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-900 text-sm font-bold text-white">1</span>
+            <div>
+              <h2 class="text-xl font-semibold text-slate-900">Imposta la chiave</h2>
+              <p class="mt-1 text-sm text-slate-600">
+                Tre rotori (dal lento al veloce), lettere visibili nelle finestre, riflettore e — se vuoi —
+                cavi sul pannello a spine.
+              </p>
+            </div>
+          </div>
+
+          <div class="mt-6 space-y-6">
+            <div>
+              <p class="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">Rotori (sinistra = lento → destra = veloce)</p>
+              <div class="grid grid-cols-3 gap-3 sm:gap-4">
+                <label class="block">
+                  <span class="mb-1 block text-sm text-slate-700">Sinistro</span>
+                  <select id="rotor-left" class="input-v2 w-full"></select>
+                </label>
+                <label class="block">
+                  <span class="mb-1 block text-sm text-slate-700">Centrale</span>
+                  <select id="rotor-mid" class="input-v2 w-full"></select>
+                </label>
+                <label class="block">
+                  <span class="mb-1 block text-sm text-slate-700">Destro</span>
+                  <select id="rotor-right" class="input-v2 w-full"></select>
+                </label>
+              </div>
+            </div>
+
+            <div>
+              <p class="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">Lettere in finestra (0 = A, 25 = Z)</p>
+              <div class="grid grid-cols-3 gap-3 sm:gap-4">
+                <label class="block">
+                  <span class="mb-1 flex items-center justify-between text-sm text-slate-700">
+                    Sinistra <span id="pos-l-lbl" class="font-mono text-xs text-slate-500">A</span>
+                  </span>
+                  <input id="pos-left" type="number" min="0" max="25" value="0" class="input-v2 w-full font-mono" />
+                </label>
+                <label class="block">
+                  <span class="mb-1 flex items-center justify-between text-sm text-slate-700">
+                    Centro <span id="pos-m-lbl" class="font-mono text-xs text-slate-500">A</span>
+                  </span>
+                  <input id="pos-mid" type="number" min="0" max="25" value="0" class="input-v2 w-full font-mono" />
+                </label>
+                <label class="block">
+                  <span class="mb-1 flex items-center justify-between text-sm text-slate-700">
+                    Destra <span id="pos-r-lbl" class="font-mono text-xs text-slate-500">A</span>
+                  </span>
+                  <input id="pos-right" type="number" min="0" max="25" value="0" class="input-v2 w-full font-mono" />
+                </label>
+              </div>
+            </div>
+
+            <details class="rounded-lg border border-slate-100 bg-slate-50/80 p-4">
+              <summary class="cursor-pointer text-sm font-medium text-slate-800">Impostazioni avanzate (anelli)</summary>
+              <p class="mt-2 text-xs text-slate-600">Di solito si lasciano a 0 per le prove. Stesso formato: 0–25 per rotore.</p>
+              <div class="mt-3 grid grid-cols-3 gap-3">
+                <input id="ring-left" type="number" min="0" max="25" value="0" class="input-v2 font-mono" title="Ring sinistro" />
+                <input id="ring-mid" type="number" min="0" max="25" value="0" class="input-v2 font-mono" title="Ring centrale" />
+                <input id="ring-right" type="number" min="0" max="25" value="0" class="input-v2 font-mono" title="Ring destro" />
+              </div>
+            </details>
+
+            <div class="grid gap-4 sm:grid-cols-2">
+              <label class="block">
+                <span class="mb-1 block text-sm text-slate-700">Riflettore</span>
+                <select id="reflector" class="input-v2 w-full font-mono">
+                  <option value="B">B (standard)</option>
+                  <option value="C">C</option>
+                </select>
+              </label>
+              <label class="block sm:col-span-1">
+                <span class="mb-1 block text-sm text-slate-700">Pannello a spine (opzionale)</span>
+                <input
+                  id="plugboard"
+                  type="text"
+                  class="input-v2 w-full font-mono"
+                  placeholder="es. AZ BM"
+                  autocomplete="off"
+                />
+              </label>
+            </div>
+          </div>
+        </li>
+
+        <!-- 2. Messaggio -->
+        <li class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div class="flex items-baseline gap-3">
+            <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-900 text-sm font-bold text-white">2</span>
+            <div>
+              <h2 class="text-xl font-semibold text-slate-900">Scrivi il messaggio in chiaro</h2>
+              <p class="mt-1 text-sm text-slate-600">Solo lettere A–Z (spazi e altro vengono ignorati).</p>
+            </div>
+          </div>
+          <textarea
+            id="plaintext"
+            rows="3"
+            class="input-v2 mt-4 w-full resize-y font-mono text-base"
+            placeholder="Esempio: HELLO"
+          >HELLO</textarea>
+
+          <div class="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <fieldset class="text-sm text-slate-700">
+              <legend class="sr-only">Animazione percorso segnale</legend>
+              <span class="mr-2 font-medium">Dopo la cifratura:</span>
+              <label class="mr-4 inline-flex cursor-pointer items-center gap-2">
+                <input type="radio" name="anim" value="last" checked class="accent-slate-900" />
+                Mostra percorso dell’ultima lettera
+              </label>
+              <label class="inline-flex cursor-pointer items-center gap-2">
+                <input type="radio" name="anim" value="none" class="accent-slate-900" />
+                Nessuna animazione
+              </label>
+            </fieldset>
+            <button type="button" id="btn-encrypt" class="btn-v2-primary w-full shrink-0 sm:w-auto">
+              Cifra il messaggio
+            </button>
+          </div>
+        </li>
+
+        <!-- 3. Output + percorso -->
+        <li class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div class="flex items-baseline gap-3">
+            <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-900 text-sm font-bold text-white">3</span>
+            <div>
+              <h2 class="text-xl font-semibold text-slate-900">Testo cifrato</h2>
+              <p class="mt-1 text-sm text-slate-600">Stessa chiave → stesso risultato. Enigma è simmetrica (cifrare = decifrare).</p>
+            </div>
+          </div>
+          <div
+            id="ciphertext-out"
+            class="mt-4 min-h-[3.5rem] rounded-xl border-2 border-dashed border-slate-200 bg-slate-50 px-4 py-3 font-mono text-xl font-semibold tracking-widest text-slate-900"
+            aria-live="polite"
+          >
+            —
+          </div>
+
+          <div class="mt-6">
+            <h3 class="text-sm font-semibold text-slate-800">Finestre rotori dopo l’ultima lettera</h3>
+            <div class="mt-2 flex flex-wrap gap-3">
+              <div class="rounded-lg border border-slate-200 bg-white px-4 py-2 text-center shadow-sm">
+                <div class="text-xs text-slate-500">Lento</div>
+                <div id="win-left" class="font-mono text-2xl font-bold text-slate-900">A</div>
+              </div>
+              <div class="rounded-lg border border-slate-200 bg-white px-4 py-2 text-center shadow-sm">
+                <div class="text-xs text-slate-500">Medio</div>
+                <div id="win-mid" class="font-mono text-2xl font-bold text-slate-900">A</div>
+              </div>
+              <div class="rounded-lg border border-slate-200 bg-white px-4 py-2 text-center shadow-sm">
+                <div class="text-xs text-slate-500">Veloce</div>
+                <div id="win-right" class="font-mono text-2xl font-bold text-slate-900">A</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="mt-8">
+            <h3 class="text-sm font-semibold text-slate-800">Percorso del segnale (ultima lettera cifrata)</h3>
+            <p class="mt-1 text-xs text-slate-500">
+              Il segnale entra a destra, attraversa i rotori, il riflettore, e torna indietro. Le caselle si illuminano in ordine.
+            </p>
+            <div id="path-strip" class="path-strip mt-4"></div>
+            <p id="path-caption" class="mt-3 font-mono text-sm text-slate-600"></p>
+          </div>
+        </li>
+
+        <!-- 4. Z3 demo -->
+        <li class="rounded-2xl border border-emerald-200/80 bg-emerald-50/50 p-6 shadow-sm">
+          <div class="flex items-baseline gap-3">
+            <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-700 text-sm font-bold text-white">4</span>
+            <div>
+              <h2 class="text-xl font-semibold text-slate-900">Ricostruire la chiave con Z3 (demo)</h2>
+              <p class="mt-1 text-sm text-slate-600">
+                Se conosci un pezzo di messaggio in chiaro (<strong>crib</strong>) e il testo cifrato corrispondente, il
+                solutore cerca un’assegnazione coerente. Senza server Python, qui vedi una <strong>simulazione</strong> del
+                processo e un risultato di esempio.
+              </p>
+            </div>
+          </div>
+
+          <label class="mt-4 block">
+            <span class="mb-1 block text-sm font-medium text-slate-800">Testo noto (crib)</span>
+            <input id="crib" type="text" class="input-v2 w-full font-mono" value="HELLO" />
+          </label>
+
+          <div class="mt-4">
+            <div class="h-2 w-full overflow-hidden rounded-full bg-slate-200" aria-hidden="true">
+              <div id="z3-bar" class="h-full w-0 rounded-full bg-emerald-600 transition-all duration-300"></div>
+            </div>
+            <p id="z3-status" class="mt-2 text-sm text-slate-600">In attesa.</p>
+          </div>
+
+          <button type="button" id="btn-crack" class="btn-v2-accent mt-4 w-full sm:w-auto">Avvia ricerca (demo)</button>
+
+          <div id="z3-result" class="mt-4 hidden rounded-lg border border-emerald-200 bg-white p-4 text-sm text-slate-800"></div>
+        </li>
+      </ol>
+
+      <footer class="mt-12 border-t border-slate-200 pt-6 text-center text-xs text-slate-500">
+        <p>
+          EnigmaZ3 · frontend semplificato (<code class="rounded bg-slate-100 px-1">frontend_v2</code>) · apri con un server HTTP locale
+          (es. <code class="rounded bg-slate-100 px-1">python3 -m http.server</code> nella cartella del progetto).
+        </p>
+      </footer>
+    </div>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

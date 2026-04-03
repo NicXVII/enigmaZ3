@@ -1,0 +1,110 @@
+/* frontend_v2 — chiaro, leggibile, focus sull’uso */
+
+.input-v2 {
+  border-radius: 0.5rem;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  padding: 0.5rem 0.75rem;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.input-v2:focus {
+  border-color: #64748b;
+  box-shadow: 0 0 0 3px rgba(100, 116, 139, 0.15);
+}
+
+.btn-v2-primary {
+  border-radius: 0.5rem;
+  background: #0f172a;
+  color: #fff;
+  padding: 0.65rem 1.25rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+
+.btn-v2-primary:hover:not(:disabled) {
+  background: #1e293b;
+}
+
+.btn-v2-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-v2-accent {
+  border-radius: 0.5rem;
+  background: #047857;
+  color: #fff;
+  padding: 0.65rem 1.25rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  transition: background 0.15s ease;
+}
+
+.btn-v2-accent:hover:not(:disabled) {
+  background: #059669;
+}
+
+.btn-v2-accent:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.path-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  justify-content: center;
+  gap: 0.35rem;
+}
+
+.path-node {
+  min-width: 3.25rem;
+  border-radius: 0.5rem;
+  border: 2px solid #e2e8f0;
+  background: #f8fafc;
+  padding: 0.4rem 0.35rem 0.5rem;
+  text-align: center;
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: #64748b;
+  transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease, color 0.15s ease;
+}
+
+.path-node .path-letter {
+  display: block;
+  margin-top: 0.2rem;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.path-node.is-on {
+  border-color: #0f172a;
+  background: #fff;
+  color: #0f172a;
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.08);
+}
+
+.path-node.is-past {
+  opacity: 0.45;
+}
+
+.path-arrow {
+  align-self: center;
+  color: #94a3b8;
+  font-size: 0.75rem;
+  padding: 0 0.1rem;
+  user-select: none;
+}
+
+@media (max-width: 640px) {
+  .path-arrow {
+    display: none;
+  }
+}
