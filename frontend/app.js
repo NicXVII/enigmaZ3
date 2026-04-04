@@ -1,5 +1,5 @@
 /**
- * EnigmaZ3 single-page app — wires simulator, UI, API, solver visualization.
+ * Single-page app EnigmaZ3: collega simulatore, UI, API e visualizzazione del solver.
  */
 
 import { buildMachineFromUI } from "./simulator.js";
@@ -89,12 +89,12 @@ async function runSimulate() {
     .toUpperCase()
     .replace(/[^A-Z]/g, "");
   if (!plain.length) {
-    setStatus("idle", "Idle");
+    setStatus("idle", "Inattivo");
     return;
   }
 
   setButtonsBusy(true);
-  setStatus("simulating", "Simulating");
+  setStatus("simulating", "Simulazione");
   setTab("signal");
   clearTrace(traceEl);
   resetMachineFromForm();
@@ -108,7 +108,7 @@ async function runSimulate() {
     const ch = plain[k];
     await new Promise((resolve) => {
       const tr = machine.encryptCharWithTrace(ch);
-      appendTrace(traceEl, `\n━━ Letter ${k + 1}/${plain.length}: ${ch} ━━\n`);
+      appendTrace(traceEl, `\n━━ Lettera ${k + 1}/${plain.length}: ${ch} ━━\n`);
       tr.traceLines.forEach((line) => appendTrace(traceEl, line + "\n"));
 
       const wrapped = {
@@ -126,7 +126,7 @@ async function runSimulate() {
   }
 
   document.getElementById("current-out").textContent = cipherAccum.slice(-1) || "—";
-  setStatus("solved", "Done");
+  setStatus("solved", "Fatto");
   setButtonsBusy(false);
 }
 
@@ -143,12 +143,12 @@ async function runStep() {
     clearTrace(document.getElementById("trace-panel"));
   }
 
-  setStatus("simulating", "Step");
+  setStatus("simulating", "Passo");
   setTab("signal");
   const ch = plain[stepIndex];
   const tr = machine.encryptCharWithTrace(ch);
   const traceEl = document.getElementById("trace-panel");
-  appendTrace(traceEl, `\n━━ Step ${stepIndex + 1}: ${ch} ━━\n`);
+  appendTrace(traceEl, `\n━━ Passo ${stepIndex + 1}: ${ch} ━━\n`);
   tr.traceLines.forEach((line) => appendTrace(traceEl, line + "\n"));
 
   const wrapped = { ...tr, inputLetter: ch, outputLetter: tr.outputLetter };
@@ -158,8 +158,8 @@ async function runStep() {
       cipherOut.value = (cipherOut.value || "") + tr.outputLetter;
     }
     stepIndex += 1;
-    if (stepIndex >= plain.length) setStatus("solved", "Done");
-    else setStatus("idle", "Idle");
+    if (stepIndex >= plain.length) setStatus("solved", "Fatto");
+    else setStatus("idle", "Inattivo");
   });
 }
 
@@ -176,7 +176,7 @@ async function runCrack() {
   if (solverLog) solverLog.innerHTML = "";
 
   setButtonsBusy(true);
-  setStatus("cracking", "Cracking");
+  setStatus("cracking", "Ricerca");
   setTab("solver");
 
   const cfg = readConfig();
@@ -187,8 +187,8 @@ async function runCrack() {
   const mode = document.getElementById("crack-mode")?.value || "positions";
 
   if (!ciphertext.length || !crib.length) {
-    appendSolverLog(solverLog, "[error] Need ciphertext and crib (A–Z).");
-    setStatus("unknown", "Need input");
+    appendSolverLog(solverLog, "[errore] Servono testo cifrato e crib (A–Z).");
+    setStatus("unknown", "Input richiesto");
     setButtonsBusy(false);
     return;
   }
@@ -233,7 +233,7 @@ async function runCrack() {
       plaintext: result.plaintext,
       constraints_used: result.constraints_used,
     });
-    appendSolverLog(solverLog, `[z3] result: ${result.status.toUpperCase()} — model emitted.`);
+    appendSolverLog(solverLog, `[z3] risultato: ${result.status.toUpperCase()} — modello generato.`);
 
     if (result.status === "sat" && result.rotors) {
       applyRecoveredToForm(result);
@@ -243,8 +243,8 @@ async function runCrack() {
     }
   } catch (e) {
     console.error(e);
-    appendSolverLog(solverLog, `[error] ${e.message || e}`);
-    setStatus("unsat", "Error");
+    appendSolverLog(solverLog, `[errore] ${e.message || e}`);
+    setStatus("unsat", "Errore");
   } finally {
     setButtonsBusy(false);
   }
@@ -281,7 +281,7 @@ function init() {
   bindTabs();
   initSchematic(document.getElementById("schematic"));
   resetMachineFromForm();
-  setStatus("idle", "Idle");
+  setStatus("idle", "Inattivo");
 
   document.getElementById("btn-simulate")?.addEventListener("click", () => runSimulate());
   document.getElementById("btn-crack")?.addEventListener("click", () => runCrack());
@@ -293,7 +293,7 @@ function init() {
     if (c) c.value = "";
     document.getElementById("current-in").textContent = "—";
     document.getElementById("current-out").textContent = "—";
-    setStatus("idle", "Idle");
+    setStatus("idle", "Inattivo");
   });
 }
 

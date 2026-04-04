@@ -1,5 +1,5 @@
 /**
- * DOM helpers: schematic, status, results, tabs.
+ * Helper DOM: schema, stato, risultati e schede.
  */
 
 const STAGE_ORDER = [
@@ -15,15 +15,15 @@ const STAGE_ORDER = [
 ];
 
 const NODE_META = {
-  plug_in: { id: "node-plug", title: "Plugboard" },
+  plug_in: { id: "node-plug", title: "Pannello" },
   r3_fwd: { id: "node-r3", title: "R3" },
   r2_fwd: { id: "node-r2", title: "R2" },
   r1_fwd: { id: "node-r1", title: "R1" },
-  refl: { id: "node-refl", title: "Refl" },
+  refl: { id: "node-refl", title: "Riflettore" },
   r1_back: { id: "node-r1b", title: "R1′" },
   r2_back: { id: "node-r2b", title: "R2′" },
   r3_back: { id: "node-r3b", title: "R3′" },
-  plug_out: { id: "node-plug2", title: "Plug" },
+  plug_out: { id: "node-plug2", title: "Pannello" },
 };
 
 export function initSchematic(container) {
@@ -31,7 +31,7 @@ export function initSchematic(container) {
   const row1 = document.createElement("div");
   row1.className = "schematic-row";
   const forward = ["plug_in", "r3_fwd", "r2_fwd", "r1_fwd", "refl"];
-  row1.appendChild(makeArrow("IN"));
+  row1.appendChild(makeArrow("ING"));
   for (let i = 0; i < forward.length; i++) {
     row1.appendChild(makeNode(forward[i]));
     if (i < forward.length - 1) row1.appendChild(makeArrow("→"));
@@ -46,7 +46,7 @@ export function initSchematic(container) {
     row2.appendChild(makeNode(backward[i]));
     if (i < backward.length - 1) row2.appendChild(makeArrow("←"));
   }
-  row2.appendChild(makeArrow("OUT"));
+  row2.appendChild(makeArrow("USC"));
   container.appendChild(row2);
 }
 
