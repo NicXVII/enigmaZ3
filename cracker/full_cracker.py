@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from z3 import If, Int, Or, Solver, sat
+from z3 import Distinct, If, Int, Or, Solver, Sum, sat
 
 from enigma import EnigmaMachine, Plugboard, Reflector, Rotor
 from enigma.reflector import REFLECTOR_WIRINGS
@@ -128,6 +128,14 @@ def _build_plug_table(plugboard_pairs: list[tuple[str, str]] | None) -> list[int
         plug_table[ia] = ib
         plug_table[ib] = ia
     return plug_table
+
+
+def _extract_plugboard_pairs(plug_table: list[int]) -> list[tuple[str, str]]:
+    pairs: list[tuple[str, str]] = []
+    for i, mapped in enumerate(plug_table):
+        if mapped > i:
+            pairs.append((chr(i + ord("A")), chr(mapped + ord("A"))))
+    return pairs
 
 
 def _matches_candidate_with_machine(
@@ -249,3 +257,90 @@ def crack_rotor_positions(
         crib=crib_n,
         target_cipher=target,
     )
+
+
+def crack_rotor_positions_and_plugboard(
+    ciphertext: str,
+    crib: str,
+    rotor_names: tuple[str, str, str] = ("I", "II", "III"),
+    reflector_name: str = "B",
+    ring_settings: tuple[int, int, int] = (0, 0, 0),
+    num_pairs: int | None = None,
+    known_plugboard_pairs: list[tuple[str, str]] | None = None,
+    solver_timeout_ms: int | None = 3000,
+) -> tuple[tuple[int, int, int], list[tuple[str, str]]] | None:
+    ciphertext_n = _normalize_alpha(ciphertext)
+    crib_n = _normalize_alpha(crib)
+    n = len(crib_n)
+    if n == 0 or len(ciphertext_n) < n:
+        return None
+    if num_pairs is not None and not (0 <= num_pairs <= 13):
+        return None
+
+    target = ciphertext_n[:n]
+    r_fwd = tuple(_wiring(name) for name in rotor_names)
+    r_inv = tuple(_inv_wiring(name) for name in rotor_names)
+    reflector = _reflector(reflector_name)
+    notches = tuple(ord(ROTOR_NOTCHES[name]) - ord("A") for name in rotor_names)
+    rings = tuple(ring_settings)
+
+    crib_vals = [ord(ch) - ord("A") for ch in crib_n]
+    target_vals = [ord(ch) - ord("A") for ch in target]
+
+    solver = Solver()
+    if solver_timeout_ms is not None:
+        solver.set(timeout=solver_timeout_ms)
+
+    left0 = Int("left0")
+    middle0 = Int("middle0")
+    right0 = Int("right0")
+    solver.add(left0 >= 0, left0 < 26)
+    solver.add(middle0 >= 0, middle0 < 26)
+    solver.add(right0 >= 0, right0 < 26)
+    pos_left, pos_middle, pos_right = _compute_positions(left0, middle0, right0, n, notches)
+
+    plug_vars = [Int(f"plug_{i}") for i in range(26)]
+    for var in plug_vars:
+        solver.add(var >= 0, var < 26)
+    solver.add(Distinct(*plug_vars))
+
+    for i in range(26):
+        solver.add(_z3_lookup(tuple(plug_vars), plug_vars[i]) == i)
+
+    if known_plugboard_pairs:
+        for a, b in known_plugboard_pairs:
+            ia = ord(a.upper()) - ord("A")
+            ib = ord(b.upper()) - ord("A")
+            if not (0 <= ia < 26 and 0 <= ib < 26) or ia == ib:
+                return None
+            solver.add(plug_vars[ia] == ib)
+            solver.add(plug_vars[ib] == ia)
+
+    if num_pairs is not None:
+        solver.add(Sum([If(plug_vars[i] == i, 0, 1) for i in range(26)]) == (2 * num_pairs))
+
+    for i in range(n):
+        p_core = plug_vars[crib_vals[i]]
+        enc = _encrypt_char_z3(
+            p_core,
+            pos_left[i],
+            pos_middle[i],
+            pos_right[i],
+            r_fwd,
+            r_inv,
+            reflector,
+            rings,
+        )
+        solver.add(_z3_lookup(tuple(plug_vars), enc) == target_vals[i])
+
+    if solver.check() != sat:
+        return None
+
+    model = solver.model()
+    positions = (
+        model[left0].as_long(),
+        model[middle0].as_long(),
+        model[right0].as_long(),
+    )
+    plug_table = [model[plug_vars[i]].as_long() for i in range(26)]
+    return positions, _extract_plugboard_pairs(plug_table)

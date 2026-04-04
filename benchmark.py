@@ -9,6 +9,7 @@ Outputs:
 from __future__ import annotations
 
 import csv
+import random
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -154,7 +155,11 @@ def plot_results(rows: list[BenchmarkRow], output_png: Path):
 def run_benchmarks(
     csv_path: str = "benchmark_results.csv",
     png_path: str = "benchmark_results.png",
+    seed: int | None = None,
 ):
+    if seed is not None:
+        random.seed(seed)
+
     rows: list[BenchmarkRow] = []
     rows.extend(benchmark_crib_length())
     rows.extend(benchmark_known_plugboard())

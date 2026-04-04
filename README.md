@@ -70,6 +70,7 @@ Crack posizioni con Z3:
 
 ```bash
 python enigma_cli.py crack \
+  --mode positions \
   --ciphertext "XYZ..." \
   --crib "WETTERBERICHT" \
   --rotors I,II,III \
@@ -79,6 +80,18 @@ python enigma_cli.py crack \
 ```
 
 Output: JSON con campo `positions`.
+
+Crack con ricerca plugboard (sperimentale, puo` restituire `null` entro timeout):
+
+```bash
+python enigma_cli.py crack \
+  --mode plugboard \
+  --ciphertext "XYZ..." \
+  --crib "WETTERBERICHT" \
+  --rotors I,II,III \
+  --num-pairs 3 \
+  --timeout-ms 3000
+```
 
 ## Demo interattiva
 
@@ -97,6 +110,12 @@ La demo mostra:
 
 ```bash
 python benchmark.py
+```
+
+Oppure da CLI:
+
+```bash
+python enigma_cli.py benchmark --csv benchmark_results.csv --png benchmark_results.png --seed 42
 ```
 
 Output generati:
