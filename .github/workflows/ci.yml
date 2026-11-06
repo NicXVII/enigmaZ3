@@ -35,4 +35,4 @@ jobs:
 
       - name: Type check
         run: |
-          mypy enigma cracker enigma_cli.py benchmark.py
+          mypy enigma cracker scripts/enigma_cli.py

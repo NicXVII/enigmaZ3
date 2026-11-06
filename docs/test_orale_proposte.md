@@ -4,7 +4,7 @@
 Mostrare in modo chiaro:
 - correttezza della simulazione Enigma;
 - efficacia del cracking (Z3 + ricerca);
-- qualita tecnica del progetto (test, lint, type-check, benchmarking).
+- qualita tecnica del progetto (test, lint, type-check).
 
 ## Pacchetto test consigliato (8-10 minuti)
 
@@ -72,40 +72,11 @@ python enigma_cli.py crack \
 ```
 Cosa dire al prof: problema piu difficile; output con `positions` e `plugboard_pairs`, oppure nessuna soluzione entro il timeout.
 
-### 5) Crack modalita full (ranking)
-Dimostrazione: confronto candidati con ordine rotori/rings ignoti.
-
-Comando:
-```bash
-python enigma_cli.py crack \
-  --mode full \
-  --ciphertext "XYZ..." \
-  --crib "WETTERBERICHT" \
-  --rotor-pool I,II,III,IV \
-  --ring-candidates 0,0,0 \
-  --ring-candidates 2,11,7 \
-  --top-k 5 \
-  --timeout-ms 8000 \
-  --per-config-timeout-ms 120 \
-  --heuristic-budget 1200
-```
-Cosa dire al prof: si vede il ranking dei candidati e la strategia ibrida tra ricerca e validazione.
-
-### 6) Benchmark riproducibile
-Dimostrazione: performance comparabile con seed fisso.
-
-Comando:
-```bash
-python enigma_cli.py benchmark --csv benchmark_results.csv --png benchmark_results.png --seed 42
-```
-Cosa dire al prof: il seed rende il confronto stabile tra run diversi.
-
 ## Ordine consigliato durante l orale
 1. Simmetria (impatto immediato).
 2. Test automatici (`pytest`).
 3. Crack `positions`.
-4. Crack `plugboard` o `full` (in base al tempo).
-5. Benchmark finale.
+4. Crack `plugboard` (in base al tempo).
 
 ## Piano B (se qualcosa va storto live)
 - Usare `python interactive_demo.py` per mostrare pipeline end-to-end guidata.

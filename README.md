@@ -1,6 +1,6 @@
 # enigmaZ3 - Enigma simulator and hybrid cracker (Z3 + search)
 
-Progetto Python che combina simulazione Enigma a 3 rotori e cracking incrementale basato su Z3, fallback numerico e ranking euristico.
+Progetto Python che combina simulazione Enigma a 3 rotori e cracking basato su Z3, con scansione numerica di riserva e ricerca del plugboard.
 
 ## Funzionalita
 
@@ -9,14 +9,13 @@ Progetto Python che combina simulazione Enigma a 3 rotori e cracking incremental
 - Riflettori supportati: `B`, `C`.
 - Cracking posizioni rotori (`crack_rotor_positions`).
 - Cracking con plugboard ignoto (`crack_with_plugboard`).
-- Ricerca completa con ordine rotori e ring settings ignoti (`rank_rotor_configurations`, `crack_full_configuration`).
-- CLI unificata: `encrypt`, `decrypt`, `crack`, `benchmark`.
+- CLI: `encrypt`, `decrypt`, `crack`.
 - Demo interattiva terminale per presentazioni orali (`interactive_demo.py`).
 
 ## Requisiti
 
 - Python 3.12 consigliato.
-- Dipendenze runtime: `z3-solver`, `matplotlib`.
+- Dipendenze runtime: `z3-solver`.
 
 ## Installazione
 
@@ -34,17 +33,18 @@ Setup sviluppo (test, coverage, lint, type-check):
 pip install -r requirements-dev.txt
 ```
 
-## API HTTP per i frontend (`frontend/`, `frontend_v2/`)
+## API HTTP per il frontend (`frontend_v2/`)
 
 Dopo `pip install -r requirements.txt`, dalla root del repo:
 
 ```bash
-python enigma_http_server.py
+PYTHONPATH=. python scripts/enigma_http_server.py
+python -m http.server 8080 --directory frontend_v2
 ```
 
-Serve `POST /encrypt` e `POST /crack` su `http://127.0.0.1:8765` (porta opzionale: `python enigma_http_server.py 9000`). I frontend usano questa URL **di default** (`frontend/api.js`); avvia il server e apri la pagina statica.
+L’API serve `POST /encrypt` e `POST /crack` su `http://127.0.0.1:8765` (porta opzionale: `PYTHONPATH=. python scripts/enigma_http_server.py 9000`). Il frontend usa questa URL **di default** (`frontend_v2/api.js`); apri `http://127.0.0.1:8080`.
 
-Dettagli request/response: `frontend/BACKEND.md`.
+Dettagli request/response: `docs/BACKEND.md`.
 
 ## Uso CLI
 
@@ -108,30 +108,6 @@ python enigma_cli.py crack \
 
 Output: JSON con `positions` e `plugboard_pairs` (oppure `result: null`).
 
-Crack modalita `full` (ordine rotori/rings ignoti con ranking):
-
-```bash
-python enigma_cli.py crack \
-  --mode full \
-  --ciphertext "XYZ..." \
-  --crib "WETTERBERICHT" \
-  --rotor-pool I,II,III,IV \
-  --ring-candidates 0,0,0 \
-  --ring-candidates 2,11,7 \
-  --top-k 5 \
-  --timeout-ms 8000 \
-  --per-config-timeout-ms 120 \
-  --heuristic-budget 1200
-```
-
-Output: JSON con `best` e lista `ranked`.
-
-Benchmark:
-
-```bash
-python enigma_cli.py benchmark --csv benchmark_results.csv --png benchmark_results.png --seed 42
-```
-
 ## Demo interattiva
 
 Script pensato per demo orale end-to-end:
@@ -162,27 +138,22 @@ Export pubblici dal package `cracker`:
 - `crack_simple_enigma(...)`
 - `crack_rotor_positions(...)`
 - `crack_with_plugboard(...)`
-- `rank_rotor_configurations(...)`
-- `crack_full_configuration(...)`
-- `CrackCandidate`
 
 Esempio rapido:
 
 ```python
-from cracker import crack_full_configuration
+from cracker import crack_rotor_positions
 
-best = crack_full_configuration(
+positions = crack_rotor_positions(
     ciphertext="...",
     crib="WETTERBERICHT",
-    rotor_pool=("I", "II", "III"),
-    search_rotor_order=True,
-    search_ring_settings=True,
-    global_timeout_ms=5000,
+    rotor_names=("I", "II", "III"),
+    reflector_name="B",
 )
-print(best)
+print(positions)
 ```
 
-## Test, quality e profiling
+## Test e quality
 
 Test:
 
@@ -195,20 +166,6 @@ Suite locale quality:
 ```bash
 ./scripts/run_quality.sh
 ```
-
-Release check locale (quality + benchmark + profiling):
-
-```bash
-./scripts/release.sh
-```
-
-Profiling full cracker:
-
-```bash
-python scripts/profile_full_cracker.py
-```
-
-Output profiling: `profiling/full_cracker_profile.txt`.
 
 ## CI
 
@@ -232,13 +189,11 @@ enigmaZ3/
 │   └── full_cracker.py
 ├── tests/
 │   └── test_enigma.py
-├── interactive_demo.py
-├── enigma_cli.py
-├── benchmark.py
 ├── scripts/
-│   ├── run_quality.sh
-│   ├── release.sh
-│   └── profile_full_cracker.py
+│   ├── enigma_cli.py
+│   ├── enigma_http_server.py
+│   ├── interactive_demo.py
+│   └── run_quality.sh
 ├── requirements.txt
 ├── requirements-dev.txt
 └── pyproject.toml

@@ -1,25 +1,24 @@
-# Connecting the EnigmaZ3 frontends to Python
+# Connecting the EnigmaZ3 frontend to Python
 
 The UI expects a JSON API. Point the browser at the static files **over HTTP** (not `file://`) so ES modules load correctly:
 
 ```bash
-cd frontend
-python3 -m http.server 8080
+python3 -m http.server 8080 --directory frontend_v2
 ```
 
-Open `http://localhost:8080` (or use `frontend_v2` on another port).
+Open `http://localhost:8080`.
 
 ## Official server: `enigma_http_server.py`
 
 From the **repository root** (with `z3-solver` installed):
 
 ```bash
-python enigma_http_server.py
+PYTHONPATH=. python scripts/enigma_http_server.py
 ```
 
 Listens on `http://127.0.0.1:8765` by default. Exposes `GET /health`, `POST /encrypt`, `POST /crack` and sends CORS headers for local browser use.
 
-By default `api.js` calls **`http://127.0.0.1:8765`** (no HTML change needed). Override if needed:
+By default `frontend_v2/api.js` calls **`http://127.0.0.1:8765`** (no HTML change needed). Override if needed:
 
 ```html
 <script>window.ENIGMA_API_BASE = "http://127.0.0.1:9000";</script>
@@ -65,7 +64,6 @@ To **disable** the API (e.g. UI-only testing): `window.ENIGMA_API_BASE = ""` bef
 |--------|------------|
 | `positions` | `crack_rotor_positions` — rotori e anelli noti; plugboard noto o vuoto |
 | `plugboard` | `crack_with_plugboard` — plugboard ignoto; usa `num_plugboard_pairs` |
-| `full` | `crack_full_configuration` — ordine rotori nel pool `I`–`V`; anelli = quelli inviati in `rings` (un solo candidato) |
 
 **Request (example)**
 
@@ -83,7 +81,7 @@ To **disable** the API (e.g. UI-only testing): `window.ENIGMA_API_BASE = ""` bef
 }
 ```
 
-Optional timeouts: `timeout_ms` / `timeout_ms_positions`, `timeout_ms_plugboard`, `timeout_ms_full`, `per_config_timeout_ms`, `heuristic_budget`. For `full`, optional `rotor_pool`: `["I","II","III","IV","V"]`.
+Optional timeouts: `timeout_ms` / `timeout_ms_positions`, `timeout_ms_plugboard`. `num_plugboard_pairs` è usato solo in modalità `plugboard`.
 
 **Response (SAT)**
 

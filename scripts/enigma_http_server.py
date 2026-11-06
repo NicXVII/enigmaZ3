@@ -20,7 +20,7 @@ import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any
 
-from cracker import crack_full_configuration, crack_rotor_positions, crack_with_plugboard
+from cracker import crack_rotor_positions, crack_with_plugboard
 from enigma import EnigmaMachine, Plugboard, Reflector, Rotor
 from enigma.reflector import REFLECTOR_WIRINGS
 from enigma.rotor import ROTOR_WIRINGS
@@ -116,15 +116,7 @@ def handle_crack(data: dict[str, Any]) -> dict[str, Any]:
 
     timeout_positions = int(data.get("timeout_ms_positions") or data.get("timeout_ms") or 30_000)
     timeout_plugboard = int(data.get("timeout_ms_plugboard") or 120_000)
-    timeout_full = int(data.get("timeout_ms_full") or 180_000)
-    per_config = int(data.get("per_config_timeout_ms") or 120)
     num_pairs = int(data.get("num_plugboard_pairs") or 3)
-
-    rotor_pool_raw = data.get("rotor_pool")
-    if rotor_pool_raw and isinstance(rotor_pool_raw, list) and len(rotor_pool_raw) >= 3:
-        rotor_pool = tuple(str(x).upper() for x in rotor_pool_raw)
-    else:
-        rotor_pool = ("I", "II", "III", "IV", "V")
 
     crib_n = "".join(ch for ch in crib.upper() if ch.isalpha())
     cipher_n = "".join(ch for ch in ciphertext.upper() if ch.isalpha())
@@ -199,40 +191,6 @@ def handle_crack(data: dict[str, Any]) -> dict[str, Any]:
             "plaintext": crib_n,
             "ciphertext": cipher_n[: len(crib_n)],
             "constraints_used": constraints_used,
-        }
-
-    if mode == "full":
-        best = crack_full_configuration(
-            ciphertext=cipher_n,
-            crib=crib_n,
-            rotor_pool=rotor_pool,
-            reflector_name=reflector,
-            plugboard_pairs=plugboard_arg,
-            search_rotor_order=True,
-            search_ring_settings=False,
-            ring_candidates=[rings],
-            top_k=8,
-            global_timeout_ms=timeout_full,
-            solver_timeout_ms_per_config=per_config,
-            heuristic_position_budget=int(data.get("heuristic_budget") or 1200),
-        )
-        if best is None or best.positions is None:
-            return {
-                "status": "unsat",
-                "plaintext": crib_n,
-                "ciphertext": cipher_n[: len(crib_n)],
-                "constraints_used": list(DEFAULT_CONSTRAINTS),
-            }
-        return {
-            "status": "sat",
-            "rotors": list(best.rotor_names),
-            "positions": list(best.positions),
-            "rings": list(best.ring_settings),
-            "plugboard": [[a, b] for a, b in plugboard_pairs] if plugboard_pairs else [],
-            "plaintext": crib_n,
-            "ciphertext": cipher_n[: len(crib_n)],
-            "constraints_used": list(DEFAULT_CONSTRAINTS),
-            "method": best.method,
         }
 
     raise ValueError(f"unknown mode: {mode}")

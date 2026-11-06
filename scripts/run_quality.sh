@@ -28,7 +28,7 @@ fi
 
 echo "[3/4] mypy"
 if "$PYTHON_BIN" -m mypy --version >/dev/null 2>&1; then
-  "$PYTHON_BIN" -m mypy enigma cracker enigma_cli.py benchmark.py
+  "$PYTHON_BIN" -m mypy enigma cracker scripts/enigma_cli.py
 else
   echo "mypy not installed, skipping type-check"
 fi
